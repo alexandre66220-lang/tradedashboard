@@ -45,7 +45,7 @@ Une ligne dans `config/instruments.ts` :
 { name: "Argent", epic: "SILVER", defaultHorizon: 30 },
 ```
 
-Le sélecteur d'actif apparaît automatiquement dès qu'il y a au moins deux instruments. Pour trouver l'epic exact, cherchez le marché dans la plateforme Capital.com ou via `GET /api/v1/markets?searchTerm=...`.
+Instruments actuels : or (`GOLD`), pétrole WTI (`OIL_CRUDE`), bitcoin (`BTCUSD`). Le sélecteur d'actif apparaît automatiquement dès qu'il y a au moins deux instruments, et chaque instrument a sa ligne dans le panneau « Prévisions jour / semaine ». Pour trouver l'epic exact, cherchez le marché dans la plateforme Capital.com ou via `GET /api/v1/markets?searchTerm=...`.
 
 ## Prévision
 
@@ -60,6 +60,10 @@ Le sélecteur d'actif apparaît automatiquement dès qu'il y a au moins deux ins
 
 **Modèle intégré** (`lib/forecast/builtin.ts`) : pente d'une régression linéaire pondérée (exponentiellement) sur les 48 dernières clôtures en log, réduite de moitié ; bande = ±1,28 × volatilité récente × √pas (~80 %). La direction est « neutre » si le mouvement attendu est faible devant le bruit. Le taux de réussite est un backtest de cette même fonction sur l'historique chargé (directions neutres exclues). Aucune promesse de précision.
 
+### Prévisions journalière et hebdomadaire
+
+`GET /api/outlook` calcule, pour chaque instrument, la prévision de la prochaine bougie journalière (`DAY`) et hebdomadaire (`WEEK`) avec le même modèle et son propre backtest. Il renvoie la variation attendue, la cible, la fourchette et le taux de réussite. Les bougies longues sont gardées en cache 5 min et le résultat 1 min. Si un epic est invalide, seule sa ligne affiche « indisponible ».
+
 ### Brancher un service externe
 
 Définissez `FORECAST_SERVICE_URL`. L'endpoint lui envoie alors un `POST` JSON :
@@ -69,7 +73,7 @@ Définissez `FORECAST_SERVICE_URL`. L'endpoint lui envoie alors un `POST` JSON :
   "candles": [{ "time": 1730000000, "open": 0, "high": 0, "low": 0, "close": 0 }] }
 ```
 
-et attend une réponse au même format que `/api/forecast`. Si le service échoue ou renvoie un format invalide, le modèle intégré prend le relais et l'interface l'indique. Pour un autre fournisseur, implémentez l'interface `ForecastProvider` (`lib/forecast/types.ts`).
+et attend une réponse au même format que `/api/forecast`. `resolution` peut aussi valoir `DAY` ou `WEEK` (avec `horizon` = 1440 ou 10080) pour les prévisions jour / semaine. Si le service échoue ou renvoie un format invalide, le modèle intégré prend le relais et l'interface l'indique. Pour un autre fournisseur, implémentez l'interface `ForecastProvider` (`lib/forecast/types.ts`).
 
 ## Sécurité
 

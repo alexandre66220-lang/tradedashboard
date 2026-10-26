@@ -231,8 +231,8 @@ export function toCandles(prices: RawPrice[]): Candle[] {
   return out.filter((c, i) => i === out.length - 1 || out[i + 1].time !== c.time);
 }
 
-export function getCandles(epic: string, resolution: string, max = 1000): Promise<Candle[]> {
-  return cached(`prices|${epic}|${resolution}|${max}`, PRICES_TTL_MS, async () => {
+export function getCandles(epic: string, resolution: string, max = 1000, ttlMs = PRICES_TTL_MS): Promise<Candle[]> {
+  return cached(`prices|${epic}|${resolution}|${max}`, ttlMs, async () => {
     const q = new URLSearchParams({ resolution, max: String(max) });
     const data = await apiGet<{ prices?: RawPrice[] }>(`/api/v1/prices/${encodeURIComponent(epic)}?${q}`);
     return toCandles(data.prices ?? []);

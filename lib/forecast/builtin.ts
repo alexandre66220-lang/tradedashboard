@@ -24,7 +24,8 @@ export interface ModelOutput {
 
 export function fitModel(closes: number[]): ModelOutput | null {
   const n = closes.length;
-  if (n < 10) return null;
+  // Log-returns need strictly positive prices (e.g. WTI briefly traded below zero in 2020).
+  if (n < 10 || !closes.every((c) => Number.isFinite(c) && c > 0)) return null;
   const y = closes.map(Math.log);
   const halfLife = n / 3;
   let sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;

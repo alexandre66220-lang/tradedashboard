@@ -38,3 +38,28 @@ export interface ForecastResponse {
 export interface ApiError {
   error: { code: string; message: string };
 }
+
+export interface OutlookCell {
+  /** Expected relative change of the forecast target vs last close (0.01 = +1 %) */
+  change: number;
+  target: number;
+  low: number;
+  high: number;
+  direction: ForecastResponse["direction"];
+  confidence: number;
+  backtestHitRate: number | null;
+  backtestSamples?: number;
+}
+
+export interface OutlookItem {
+  epic: string;
+  name: string;
+  last: number | null;
+  horizons: Record<string, OutlookCell | { error: string }>;
+}
+
+export interface OutlookResponse {
+  items: OutlookItem[];
+  source?: string;
+  generatedAt: number;
+}

@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_RESOLUTION, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
+import OutlookPanel from "./OutlookPanel";
 
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
 
@@ -130,6 +131,15 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     };
   }, [tick]);
 
+  const selectEpic = (value: string) => {
+    const next = instruments.find((i) => i.epic === value);
+    if (!next || next.epic === epic) return;
+    setEpic(next.epic);
+    writePref("epic", next.epic);
+    const h = Number(readPref("h:" + next.epic, "", HORIZON_CHOICES.map(String)));
+    setHorizon(h || next.defaultHorizon);
+  };
+
   const last = candles.at(-1);
   const prev = candles.at(-2);
   const change = last && prev ? last.close - prev.close : null;
@@ -146,13 +156,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             <select
               aria-label="Instrument"
               value={epic}
-              onChange={(e) => {
-                const next = instruments.find((i) => i.epic === e.target.value)!;
-                setEpic(next.epic);
-                writePref("epic", next.epic);
-                const h = Number(readPref("h:" + next.epic, "", HORIZON_CHOICES.map(String)));
-                setHorizon(h || next.defaultHorizon);
-              }}
+              onChange={(e) => selectEpic(e.target.value)}
             >
               {instruments.map((i) => (
                 <option key={i.epic} value={i.epic}>
@@ -248,7 +252,8 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           <PriceChart candles={candles} forecast={forecast} showBand={showBand} viewKey={`${epic}|${resolution}|${horizon}`} />
         </div>
 
-        <aside className="panel">
+        <aside className="side">
+          <section className="panel">
           <div className="panel-head">
             <span>Prévision {horizon} min</span>
             <span className="tag">expérimental</span>
@@ -285,6 +290,14 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             réussite indique la part de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil
             d’investissement.
           </p>
+          </section>
+          <OutlookPanel
+            selected={epic}
+            onSelect={(e) => {
+              selectEpic(e);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
         </aside>
       </div>
     </main>
