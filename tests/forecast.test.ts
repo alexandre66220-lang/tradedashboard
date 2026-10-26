@@ -51,3 +51,13 @@ describe("built-in forecast", () => {
     expect(f.points).toHaveLength(1);
   });
 });
+
+describe("robustness", () => {
+  it("refuses to fit on non-positive prices instead of returning NaN", () => {
+    const closes = Array.from({ length: 60 }, (_, i) => 20 - i * 0.5);
+    expect(fitModel(closes)).toBeNull();
+    const f = builtinForecast({ epic: "OIL_CRUDE", resolution: "DAY", resolutionMinutes: 1440, horizon: 1440, candles: makeCandles(closes, 86400) });
+    expect(f.points).toEqual([]);
+    expect(backtest(makeCandles(closes, 86400), 1).samples).toBeLessThan(20);
+  });
+});

@@ -7,21 +7,27 @@ const SESSION_TTL_MS = Number(process.env.MOCK_SESSION_TTL_MS || 600000);
 const sessions = new Map();
 const stats = { session: 0, prices: 0, markets: 0, other: 0 };
 
-function series(stepMin, n) {
+const BASE = { GOLD: 2650, OIL_CRUDE: 72, BTCUSD: 68000 };
+
+function series(epic, stepMin, n) {
   const step = stepMin * 60;
   const end = Math.floor(Date.now() / 1000 / step) * step;
-  let price = 2650, seed = 42 + stepMin;
+  const base = BASE[epic];
+  let price = base, seed = 42 + stepMin + epic.length;
+  const vol = (base / 2650) * 2 * Math.sqrt(stepMin);
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
   const out = [];
   for (let i = n - 1; i >= 0; i--) {
     const t = end - i * step;
     const open = price;
-    const close = open + rnd() * 2 * Math.sqrt(stepMin) + 0.05 * Math.sin(i / 40);
-    const high = Math.max(open, close) + Math.abs(rnd());
-    const low = Math.min(open, close) - Math.abs(rnd());
+    // Multiplicative steps keep prices positive over long histories
+    const close = open * (1 + (rnd() * vol + 0.025 * vol * Math.sin(i / 40)) / base);
+    const high = Math.max(open, close) + Math.abs(rnd()) * vol * 0.5;
+    const low = Math.min(open, close) - Math.abs(rnd()) * vol * 0.5;
     price = close;
     const iso = new Date(t * 1000).toISOString().slice(0, 19);
-    const p = (v) => ({ bid: +(v - 0.15).toFixed(2), ask: +(v + 0.15).toFixed(2) });
+    const spread = base * 0.00006;
+    const p = (v) => ({ bid: +(v - spread).toFixed(3), ask: +(v + spread).toFixed(3) });
     out.push({ snapshotTime: iso, snapshotTimeUTC: iso, openPrice: p(open), closePrice: p(close), highPrice: p(high), lowPrice: p(low), lastTradedVolume: 100 });
   }
   return out;
@@ -56,10 +62,10 @@ http.createServer((req, res) => {
   let m;
   if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/prices\/(.+)$/))) {
     stats.prices++;
-    if (m[1] !== "GOLD") return send(res, 404, { errorCode: "error.not-found.epic" });
-    const stepMin = { MINUTE: 1, MINUTE_5: 5, MINUTE_15: 15 }[url.searchParams.get("resolution")];
+    if (!BASE[m[1]] || process.env.MOCK_MISSING === m[1]) return send(res, 404, { errorCode: "error.not-found.epic" });
+    const stepMin = { MINUTE: 1, MINUTE_5: 5, MINUTE_15: 15, DAY: 1440, WEEK: 10080 }[url.searchParams.get("resolution")];
     if (!stepMin) return send(res, 400, { errorCode: "error.invalid.resolution" });
-    return send(res, 200, { prices: series(stepMin, Math.min(Number(url.searchParams.get("max") || 10), 1000)), instrumentType: "COMMODITIES" });
+    return send(res, 200, { prices: series(m[1], stepMin, Math.min(Number(url.searchParams.get("max") || 10), 1000)), instrumentType: "COMMODITIES" });
   }
   if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/markets\/(.+)$/))) {
     stats.markets++;

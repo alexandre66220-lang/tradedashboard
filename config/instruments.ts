@@ -10,6 +10,8 @@ export interface Instrument {
 // Add one line per instrument. The selector appears in the UI as soon as there are 2+.
 export const INSTRUMENTS: Instrument[] = [
   { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30 },
+  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30 },
+  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30 },
 ];
 
 export const RESOLUTIONS = {
@@ -17,6 +19,14 @@ export const RESOLUTIONS = {
   "5": { api: "MINUTE_5", minutes: 5, label: "5m" },
   "15": { api: "MINUTE_15", minutes: 15, label: "15m" },
 } as const;
+
+// Longer-term outlooks shown for every instrument (one step of daily / weekly candles).
+export const OUTLOOKS = [
+  { key: "day", label: "Jour", api: "DAY", minutes: 24 * 60 },
+  { key: "week", label: "Semaine", api: "WEEK", minutes: 7 * 24 * 60 },
+] as const;
+
+export type OutlookKey = (typeof OUTLOOKS)[number]["key"];
 
 export type ResolutionKey = keyof typeof RESOLUTIONS;
 export const DEFAULT_RESOLUTION: ResolutionKey = "5";
