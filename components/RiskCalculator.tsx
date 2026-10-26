@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { sizePosition } from "@/lib/risk";
 import type { AppliedLevels } from "./SlTpAdvisor";
 import type { TradeDraft } from "./TradesPanel";
+import Disclaimer from "./Disclaimer";
 
 interface Props {
   epic: string;
@@ -161,11 +162,11 @@ export default function RiskCalculator({ epic, last, atr, direction, decimals, a
           ))}
         </>
       )}
-      <p className="disclaimer">
+      <Disclaimer>
         Montants dans la devise de cotation (USD) : convertissez votre capital si votre compte est en euros. « u. » = unités du contrat : vérifiez la
         valeur d’une unité chez Capital.com. L’ATR (amplitude moyenne des 14 dernières bougies) sert à placer le stop hors du bruit normal. Le
         spread et le glissement ne sont pas inclus. Ce n’est pas un conseil d’investissement.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

@@ -162,6 +162,10 @@ Définissez `FORECAST_SERVICE_URL`. L'endpoint lui envoie alors un `POST` JSON :
 
 et attend une réponse au même format que `/api/forecast`. `resolution` peut aussi valoir `DAY` ou `WEEK` (avec `horizon` = 1440 ou 10080) pour les prévisions jour / semaine. Si le service échoue ou renvoie un format invalide, le modèle intégré prend le relais et l'interface l'indique. Pour un autre fournisseur, implémentez l'interface `ForecastProvider` (`lib/forecast/types.ts`).
 
+## Disposition (téléphone et ordinateur)
+
+Le graphique, le prix et le feu « trade / pas de trade » restent en haut. En dessous, une **barre d'onglets** (fixée en bas de l'écran sur téléphone) évite de défiler indéfiniment : **Prévision** (prévision, jour / semaine, sentiment), **Trade** (conseil SL / TP, calculateur de risque), **Journal** (mes trades, journal des prévisions) et **Alertes** (calendrier, notifications). Un point rouge / orange sur « Trade » signale que le feu n'est pas vert. Les textes d'avertissement sont repliés sous « À savoir ». Sur grand écran (≥ 900 px) la prévision se place à côté du graphique et les autres panneaux s'affichent en colonnes sous l'onglet choisi. Le dernier onglet est mémorisé.
+
 ## Sécurité
 
 - Tout le site (pages et API) passe par `proxy.ts` (le nom du middleware dans Next.js 16). Sans cookie valide, les pages renvoient vers `/login` et l'API répond 401.

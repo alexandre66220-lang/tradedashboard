@@ -18,7 +18,8 @@ body {
 }
 button, select, input { font: inherit; color: inherit; }
 
-.wrap { max-width: 1280px; margin: 0 auto; padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 10px 12px calc(84px + env(safe-area-inset-bottom)); }
+@media (min-width: 900px) { .wrap { padding-bottom: 24px; } }
 
 .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .title { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -42,16 +43,15 @@ button.ghost { background: none; border: 1px solid var(--border); border-radius:
 .seg button { background: none; border: 0; padding: 6px 14px; color: var(--muted); cursor: pointer; min-height: 34px; }
 .seg button.on { background: var(--accent); color: #fff; }
 .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
-.field select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; min-height: 34px; }
+.field select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; min-height: 40px; font-size: 16px; }
 .field.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 
 .alert { border: 1px solid rgba(239,83,80,.4); background: rgba(239,83,80,.08); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
 .alert.info { border-color: rgba(240,185,11,.35); background: rgba(240,185,11,.07); }
 
-.layout { display: grid; grid-template-columns: 1fr; gap: 10px; }
-@media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 330px; } }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 
-.chart-box { position: relative; height: 58vh; min-height: 300px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.chart-box { position: relative; height: 44vh; height: 44svh; min-height: 260px; max-height: 520px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 @media (min-width: 900px) { .chart-box { height: 72vh; } }
 .chart { position: absolute; inset: 0; }
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); z-index: 3; pointer-events: none; }
@@ -199,3 +199,53 @@ button.mini { padding: 0 6px; margin-left: 8px; min-height: 0; font-size: 12px; 
 .rc-grid > * { min-width: 0; }
 .rc-grid.one { grid-template-columns: 1fr; }
 @media (min-width: 900px) { .rc-grid.one { grid-template-columns: 1fr 1fr; } }
+
+/* ---- sections: tab bar + panels ------------------------------------------------------------ */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr);
+  background: rgba(18,22,31,.97); border-top: 1px solid var(--border); padding: 0 4px env(safe-area-inset-bottom); backdrop-filter: blur(8px); }
+.tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; padding: 6px 2px;
+  background: none; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.tab.on { color: var(--accent); }
+.tab.on::before { content: ""; position: absolute; top: 0; left: 22%; right: 22%; height: 2px; background: var(--accent); border-radius: 0 0 2px 2px; }
+.dot-badge { position: absolute; top: 9px; left: calc(50% + 7px); width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--panel); }
+.dot-badge.red { background: var(--down); }
+.dot-badge.orange { background: var(--warn); }
+.tabpanels { scroll-margin-top: 8px; min-width: 0; }
+.tabpanel { display: grid; gap: 10px; align-content: start; }
+.tabpanel[hidden] { display: none; }
+.tabpanel > .panel { margin-top: 0; }
+
+.disc { margin: 12px 0 0; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.disc summary { cursor: pointer; padding: 10px 0; min-height: 36px; display: flex; align-items: center; }
+.disc p { margin: 0 0 4px; }
+.foot { margin: 14px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+
+/* comfortable touch targets */
+details > summary { min-height: 40px; display: flex; align-items: center; }
+.light summary { min-height: 44px; }
+button.ghost { min-height: 38px; }
+button.mini { min-height: 32px; padding: 4px 10px; }
+.seg button { min-height: 40px; }
+
+@media (min-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr) 340px; grid-template-areas: "chart forecast" "tabs tabs" "panels panels"; align-items: start; }
+  .chart-box { grid-area: chart; height: 72vh; max-height: none; }
+  .tabbar { grid-area: tabs; position: static; display: flex; gap: 8px; background: none; border: 0; padding: 0; backdrop-filter: none; }
+  .tab { flex-direction: row; gap: 8px; min-height: 42px; padding: 0 16px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--panel); }
+  .tab.on { border-color: var(--accent); }
+  .tab.on::before { display: none; }
+  .tab.only-mobile { display: none; }
+  .dot-badge { position: static; border: 0; }
+  .tabpanels { display: contents; }
+  .tabpanel { grid-area: panels; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; }
+  .tp-forecast { grid-area: forecast; grid-template-columns: 1fr; }
+  .tabpanel[hidden] { display: none; }
+}
+
+/* ---- no horizontal overflow, whatever the content ------------------------------------------ */
+/* inputs have a ~170px intrinsic width that stops grid columns from shrinking: start from 0 and grow */
+.rc-input input, .rc-input select, .tclose input { width: 0; min-width: 0; flex: 1 1 auto; }
+.rc-field, .rc-input { min-width: 0; max-width: 100%; }
+.panel { min-width: 0; overflow-wrap: anywhere; }
+code { overflow-wrap: anywhere; }
+.tabpanel > *, .tabpanels, .layout > * { min-width: 0; }

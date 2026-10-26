@@ -1,4 +1,5 @@
 import { crowdRelation } from "@/lib/journal/journal";
+import Disclaimer from "./Disclaimer";
 
 interface Props {
   sentiment: { long: number; short: number } | null | undefined;
@@ -40,11 +41,11 @@ export default function SentimentPanel({ sentiment, direction }: Props) {
           </p>
         </>
       )}
-      <p className="disclaimer">
+      <Disclaimer>
         Part des clients de Capital.com qui sont acheteurs ou vendeurs en ce moment. On dit parfois qu’une foule très unilatérale se trompe à court
         terme, mais ce n’est pas prouvé : le journal des prévisions enregistre ce sentiment avec chaque prévision et mesure si elle réussit mieux avec
         ou contre la foule.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

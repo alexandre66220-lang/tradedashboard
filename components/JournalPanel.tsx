@@ -6,6 +6,7 @@ import type { JournalHit, JournalStats } from "@/lib/journal/types";
 import { verdict } from "@/lib/verdict";
 import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
+import Disclaimer from "./Disclaimer";
 
 const POLL_MS = 60_000;
 const MODEL_LABEL = { ml: "Modèle ML", builtin: "Modèle intégré" } as const;
@@ -163,11 +164,11 @@ export default function JournalPanel() {
       )}
 
       {error && data && <p className="muted small">Mise à jour impossible : {error}</p>}
-      <p className="disclaimer">
+      <Disclaimer>
         Gains simulés : une unité par prévision (haussière ou baissière, les « neutres » sont ignorées), après un spread supposé par instrument
         (réglable dans <code>config/instruments.ts</code>), sans frais de financement ni glissement. Tant qu’il y a moins de 20 prévisions
         jugées, aucun taux n’est affiché : trop peu pour conclure. Ce n’est pas un conseil d’investissement.
-      </p>
+      </Disclaimer>
     </section>
   );
 }
