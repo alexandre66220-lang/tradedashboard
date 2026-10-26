@@ -132,3 +132,21 @@ code { background: #1b1f2b; padding: 1px 4px; border-radius: 3px; font-size: 12p
 .rc-out { margin-top: 10px; grid-template-columns: repeat(3, 1fr); row-gap: 10px; }
 @media (min-width: 900px) { .rc-out { grid-template-columns: repeat(2, 1fr); } .rc-out > div { display: block; } }
 .rc-warn { color: var(--warn); font-size: 12px; margin: 8px 0 0; }
+
+.sl-top { margin-top: 10px; grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 900px) { .sl-top > div { display: block; } .sl-top { grid-template-columns: 1fr; } .sl-top > div { display: flex; justify-content: space-between; } }
+.sl-why { margin: 10px 0 8px; }
+.sl-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.sl-table th, .sl-table td { padding: 6px 3px; border-top: 1px solid var(--border); text-align: right; font-weight: 500; vertical-align: top; }
+.sl-table thead th { border-top: 0; color: var(--muted); font-size: 11px; font-weight: 400; }
+.sl-table tbody th { text-align: left; font-weight: 500; }
+.sl-table tbody tr { cursor: pointer; }
+.sl-table tr.cur th, .sl-table tr.cur td { background: rgba(41,98,255,.1); }
+.sl-rec { color: var(--warn); }
+.sl-sum { margin-top: 10px; font-size: 13px; }
+.sl-sum p { margin: 6px 0; }
+.sl-verdict { padding: 8px 10px; border-radius: 6px; background: #1b1f2b; color: var(--muted); }
+.sl-verdict.edge { background: rgba(38,166,154,.12); color: var(--up); }
+.sl-verdict.against { background: rgba(239,83,80,.1); color: var(--down); }
+.sl-apply { width: 100%; margin-top: 8px; background: var(--accent); border: 0; border-radius: 6px; padding: 10px; color: #fff; font-weight: 600; cursor: pointer; min-height: 40px; }
+.sl-table thead th:first-child { text-align: left; }
