@@ -6,11 +6,14 @@ import { DEFAULT_RESOLUTION, DEFAULT_SPREAD_BPS, HORIZON_CHOICES, RESOLUTIONS, t
 import { averageTrueRange } from "@/lib/risk";
 import { tradeStats } from "@/lib/trades";
 import { trafficLight } from "@/lib/trafficlight";
+import { relevantEvents } from "@/lib/calendar";
+import { useCalendar } from "@/lib/useCalendar";
 import { useTrades } from "@/lib/useTrades";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
 import TradesPanel, { type TradeDraft } from "./TradesPanel";
+import CalendarPanel from "./CalendarPanel";
 import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
@@ -76,6 +79,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [draft, setDraft] = useState<TradeDraft | null>(null);
   const [dailyLimit, setDailyLimitState] = useState<number | null>(null);
   const tradeLog = useTrades();
+  const calendar = useCalendar();
   useEffect(() => {
     const v = Number(readRaw("lim:daily") || NaN);
     if (Number.isFinite(v) && v > 0) setDailyLimitState(v);
@@ -184,8 +188,15 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         todayPnl,
         dailyLossLimit: dailyLimit,
         now: Math.floor(Date.now() / 1000),
+        news: calendar.events
+          ? relevantEvents(calendar.events, instrument, Math.floor(Date.now() / 1000), -30, 90).map((e) => ({
+              title: e.title,
+              minutesFromNow: e.minutesFromNow,
+              impact: e.impact === "high" ? ("high" as const) : ("medium" as const),
+            }))
+          : undefined,
       }),
-    [meta?.marketStatus, meta?.quote, spreadAssumed, candles, resolution, todayPnl, dailyLimit],
+    [meta?.marketStatus, meta?.quote, spreadAssumed, candles, resolution, todayPnl, dailyLimit, calendar.events, instrument],
   );
   const prev = candles.at(-2);
   const change = last && prev ? last.close - prev.close : null;
@@ -366,6 +377,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
               setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth" }), 100);
             }}
           />
+          <CalendarPanel events={calendar.events} stale={calendar.stale} error={calendar.error} profile={instrument} name={instrument.name} />
           <OutlookPanel
             selected={epic}
             onSelect={(e) => {

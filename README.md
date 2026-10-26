@@ -17,6 +17,7 @@ Copiez `.env.example` en `.env.local` (jamais commité) et renseignez :
 | `DASHBOARD_PASSWORD` | Mot de passe unique du site. S'il est absent, le site entier est verrouillé (503) |
 | `FORECAST_SERVICE_URL` | Optionnel : URL du service de prévision ML (`https://…/api/forecast`), voir `forecast-service/README.md` |
 | `BLOB_READ_WRITE_TOKEN` | Optionnel : ajouté automatiquement par Vercel quand un stockage Blob (privé) est relié au projet ; active le journal des prévisions |
+| `CALENDAR_FEED_URL` | Optionnel : adresse du calendrier économique (défaut : le flux hebdomadaire gratuit de Fair Economy, format ForexFactory) |
 | `CRON_SECRET` | Optionnel : longue valeur aléatoire ; autorise le relevé quotidien (`/api/journal/record`, lancé par Vercel Cron) |
 | `FORECAST_SERVICE_TOKEN` | Optionnel mais requis avec le service ML : secret partagé, envoyé en `Authorization: Bearer …` (même valeur des deux côtés) |
 
@@ -85,6 +86,15 @@ Pastille sous le prix, toujours informative (rien n'est bloqué) :
 - **Rouge** : marché fermé, spread au moins 3 fois le spread habituel, perte maximale du jour atteinte.
 - **Orange** : spread élargi (≥ 1,8×), volatilité parmi les 10 % les plus fortes ou les plus faibles de l'historique chargé, données en retard, moitié de la perte du jour atteinte.
 - Le spread réel vient des prix d'achat / vente de la fiche du marché Capital.com (rafraîchis toutes les 30 s) ; il est comparé au `spreadBps` supposé dans `config/instruments.ts`, ce qui permet aussi de recaler cette valeur sur vos vrais spreads.
+
+### Calendrier économique
+
+Panneau « Annonces à venir » (colonne de droite) et feu rouge autour des grosses annonces.
+
+- **Source** : flux JSON hebdomadaire gratuit (`ff_calendar_thisweek.json`, plus la semaine suivante si elle existe), au format `{ title, country, date, impact, forecast, previous }`. Modifiable avec `CALENDAR_FEED_URL`. Lu côté serveur (`/api/calendar`, derrière le mot de passe du site), mis en cache 30 min (le flux limite les appels) ; en cas d'échec, la dernière copie valide est servie, avec une mention « données anciennes », et la source n'est pas réinterrogée pendant 10 min.
+- **Lecture défensive** : les lignes mal formées, les jours fériés et les dates sans décalage horaire explicite sont ignorés (deviner le fuseau décalerait toutes les annonces). Si un flux d'au moins 10 lignes ne donne rien d'exploitable, le format est jugé inattendu : l'interface affiche « calendrier indisponible » au lieu de « aucune annonce », et le feu précise que les annonces ne sont pas vérifiées.
+- **Pertinence** : par instrument, `newsCurrencies` (défaut `USD`) et `newsKeywords` dans `config/instruments.ts` (par exemple `crude`, `opec` pour le pétrole : ces titres comptent comme fort impact). Impact faible ignoré.
+- **Feu** : rouge de 30 min avant à 30 min après une annonce forte, orange jusqu'à 90 min avant pour toute annonce moyenne ou forte.
 
 ### Calculateur de risque
 
