@@ -14,6 +14,8 @@ export interface CandlesResponse {
   resolution: string;
   candles: Candle[];
   marketStatus: MarketStatus;
+  /** Live bid / offer, when the broker gives them */
+  quote?: { bid: number; offer: number } | null;
   env: "demo" | "live";
 }
 
