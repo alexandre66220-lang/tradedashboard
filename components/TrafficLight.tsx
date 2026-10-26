@@ -13,6 +13,7 @@ export default function TrafficLight({ result, assumedSpreadBps }: { result: Lig
       </summary>
       <div className="light-body">
         {result.reasons.length === 0 && <p className="small">{`Marché ouvert, spread et volatilité dans la norme${result.newsChecked ? ", aucune annonce proche" : ""}, limite du jour respectée.`}</p>}
+        {!result.newsChecked && <p className="muted small">Calendrier économique indisponible : les annonces ne sont pas vérifiées.</p>}
         <ul>
           {result.reasons.map((r) => (
             <li key={r.text} className={r.level}>

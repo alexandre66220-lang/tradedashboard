@@ -1,4 +1,6 @@
-export interface Instrument {
+import type { NewsProfile } from "@/lib/calendar";
+
+export interface Instrument extends NewsProfile {
   /** Display name in the UI */
   name: string;
   /** Capital.com market identifier (check with /api/v1/markets?searchTerm=...) */
@@ -7,13 +9,14 @@ export interface Instrument {
   defaultHorizon: number;
   /** Assumed round-trip cost in basis points (1 bp = 0.01 %), used by the simulated gains of the journal. Adjust to your real spread. */
   spreadBps?: number;
+  // newsCurrencies / newsKeywords (from NewsProfile): which economic announcements matter for this instrument
 }
 
 // Add one line per instrument. The selector appears in the UI as soon as there are 2+.
 export const INSTRUMENTS: Instrument[] = [
-  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2 },
-  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5 },
-  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8 },
+  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2, newsCurrencies: ["USD"] },
+  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5, newsCurrencies: ["USD"], newsKeywords: ["crude", "opec"] },
+  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8, newsCurrencies: ["USD"] },
 ];
 
 export const RESOLUTIONS = {

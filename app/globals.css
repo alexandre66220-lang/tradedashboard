@@ -181,3 +181,9 @@ code { background: #1b1f2b; padding: 1px 4px; border-radius: 3px; font-size: 12p
 .tclose button { background: var(--accent); border: 0; border-radius: 6px; padding: 0 12px; color: #fff; cursor: pointer; min-height: 36px; }
 .tclose button.ghost { background: none; border: 1px solid var(--border); color: var(--muted); }
 button.mini { padding: 0 6px; margin-left: 8px; min-height: 0; font-size: 12px; }
+
+.news { list-style: none; margin: 8px 0 0; padding: 0; }
+.news li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.news li > div { flex: 1; min-width: 0; }
+.imp { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--warn); }
+.imp.high { background: var(--down); }

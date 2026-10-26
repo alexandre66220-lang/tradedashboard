@@ -41,6 +41,22 @@ const send = (res, status, body, headers = {}) => {
 http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/__stats") return send(res, 200, stats);
+  if (url.pathname === "/ff_calendar_thisweek.json") {
+    // events relative to now, with explicit UTC offsets like the real feed
+    const at = (min) => new Date(Date.now() + min * 60000).toISOString().replace(/\.\d+Z$/, "+00:00");
+    const ev = (title, country, min, impact, forecast = "", previous = "") => ({ title, country, date: at(min), impact, forecast, previous });
+    const list = [
+      ev("Non-Farm Employment Change", "USD", Number(process.env.MOCK_NEWS_MIN || 20), "High", "180K", "227K"),
+      ev("ISM Services PMI", "USD", 190, "Medium", "52.1", "51.6"),
+      ev("German Ifo Business Climate", "EUR", 60, "High", "86.0", "85.7"),
+      ev("Crude Oil Inventories", "USD", 1560, "Medium", "-1.2M", "0.5M"),
+      ev("Core CPI m/m", "USD", 2900, "High", "0.3%", "0.3%"),
+      ev("Unemployment Claims", "USD", 400, "Low"),
+      ev("Bank Holiday", "USD", 500, "Holiday"),
+    ];
+    return send(res, 200, process.env.MOCK_CAL_BAD ? { not: "a list" } : list);
+  }
+  if (url.pathname === "/ff_calendar_nextweek.json") return send(res, 404, {});
   if (req.headers["x-cap-api-key"] !== "test-key") return send(res, 401, { errorCode: "error.invalid.api.key" });
   if (req.method === "POST" && url.pathname === "/api/v1/session") {
     let body = "";
