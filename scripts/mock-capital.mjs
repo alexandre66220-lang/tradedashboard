@@ -76,6 +76,12 @@ http.createServer((req, res) => {
   if (!last || Date.now() - last > SESSION_TTL_MS) return send(res, 401, { errorCode: "error.invalid.session.token" });
   sessions.set(cst, Date.now());
   let m;
+  if (req.method === "GET" && url.pathname === "/api/v1/clientsentiment") {
+    if (process.env.MOCK_SENT_BAD) return send(res, 404, { errorCode: "error.not-found" });
+    const known = { GOLD: 72, OIL_CRUDE: 41, BTCUSD: 55 };
+    const ids = (url.searchParams.get("marketIds") || "").split(",").filter((i) => known[i]);
+    return send(res, 200, { clientSentiments: ids.map((id) => ({ marketId: id, longPositionPercentage: known[id], shortPositionPercentage: 100 - known[id] })) });
+  }
   if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/prices\/(.+)$/))) {
     stats.prices++;
     if (!BASE[m[1]] || process.env.MOCK_MISSING === m[1]) return send(res, 404, { errorCode: "error.not-found.epic" });

@@ -3,7 +3,7 @@ import type { Candle, MarketStatus } from "./types";
 
 /**
  * Minimal, READ-ONLY Capital.com client.
- * Only three calls are allowed: session creation, market details and price history.
+ * Only four calls are allowed: session creation, market details, price history and client sentiment.
  * No trading endpoint (positions, workingorders, confirms...) is implemented or reachable.
  */
 
@@ -16,6 +16,8 @@ const ALLOWED = [
   { method: "POST", path: /^\/api\/v1\/session$/ },
   { method: "GET", path: /^\/api\/v1\/prices\/[A-Za-z0-9._-]+$/ },
   { method: "GET", path: /^\/api\/v1\/markets\/[A-Za-z0-9._-]+$/ },
+  // Share of Capital.com clients long / short: public market data, not an account or trading endpoint
+  { method: "GET", path: /^\/api\/v1\/clientsentiment$/ },
 ];
 
 // Sessions expire after 10 min of inactivity: renew proactively a bit before.
@@ -258,8 +260,54 @@ export async function getMarketStatus(epic: string): Promise<MarketStatus> {
   return (await getMarketQuote(epic)).status;
 }
 
+export interface Sentiment {
+  /** % of clients holding long positions (0..100) */
+  long: number;
+  short: number;
+}
+
+/** Reads { clientSentiments: [{ marketId, longPositionPercentage, shortPositionPercentage }] }; skips anything else. */
+export function parseSentiment(data: unknown): Record<string, Sentiment> {
+  const list = (data as { clientSentiments?: unknown } | null)?.clientSentiments;
+  const out: Record<string, Sentiment> = {};
+  if (!Array.isArray(list)) return out;
+  for (const r of list as Array<Record<string, unknown>>) {
+    const long = Number(r?.longPositionPercentage), short = Number(r?.shortPositionPercentage);
+    if (typeof r?.marketId !== "string" || !Number.isFinite(long) || !Number.isFinite(short) || long < 0 || short < 0) continue;
+    const total = long + short;
+    if (total < 98 || total > 102) continue; // not percentages of one whole: do not guess
+    out[r.marketId.toUpperCase()] = { long: Math.round((long / total) * 1e4) / 100, short: Math.round((short / total) * 1e4) / 100 };
+  }
+  return out;
+}
+
+const SENTIMENT_TTL_MS = 60_000;
+const SENTIMENT_FAILURE_TTL_MS = 5 * 60_000;
+let sentimentFailedAt = 0;
+
+/** Client sentiment for the given epics; never throws (an unsupported market or endpoint just has no entry). */
+export async function getSentiment(epics: string[]): Promise<Record<string, Sentiment>> {
+  if (sentimentFailedAt && Date.now() - sentimentFailedAt < SENTIMENT_FAILURE_TTL_MS) return {};
+  const ids = [...epics].sort().join(",");
+  try {
+    return await cached(`sentiment|${ids}`, SENTIMENT_TTL_MS, async () => {
+      const q = new URLSearchParams({ marketIds: ids });
+      return parseSentiment(await apiGet<unknown>(`/api/v1/clientsentiment?${q}`));
+    });
+  } catch (err) {
+    sentimentFailedAt = Date.now();
+    console.warn("[capital] client sentiment unavailable:", err instanceof CapitalError ? err.code : "unknown");
+    return {};
+  }
+}
+
+export async function getSentimentFor(epic: string, all: string[]): Promise<Sentiment | null> {
+  return (await getSentiment(all))[epic.toUpperCase()] ?? null;
+}
+
 /** Test helper */
 export function __resetCapitalState() {
+  sentimentFailedAt = 0;
   session = null;
   loginInFlight = null;
   cache.clear();
