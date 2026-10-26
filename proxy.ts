@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isValidSession, SESSION_COOKIE } from "@/lib/auth";
 
 const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/logout"]);
+// Called by Vercel Cron without the dashboard cookie; the route itself requires `Bearer $CRON_SECRET` (fails closed).
+const CRON_PATH = "/api/journal/record";
 
 export async function proxy(req: NextRequest) {
   const password = process.env.DASHBOARD_PASSWORD;
@@ -16,7 +18,7 @@ export async function proxy(req: NextRequest) {
       : new NextResponse(msg, { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  if (PUBLIC_PATHS.has(pathname) || pathname === CRON_PATH) return NextResponse.next();
 
   if (await isValidSession(req.cookies.get(SESSION_COOKIE)?.value, password)) return NextResponse.next();
 

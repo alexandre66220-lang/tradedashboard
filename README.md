@@ -16,6 +16,8 @@ Copiez `.env.example` en `.env.local` (jamais commité) et renseignez :
 | `CAPITAL_ENV` | `demo` (défaut) ou `live` |
 | `DASHBOARD_PASSWORD` | Mot de passe unique du site. S'il est absent, le site entier est verrouillé (503) |
 | `FORECAST_SERVICE_URL` | Optionnel : URL du service de prévision ML (`https://…/api/forecast`), voir `forecast-service/README.md` |
+| `BLOB_READ_WRITE_TOKEN` | Optionnel : ajouté automatiquement par Vercel quand un stockage Blob (privé) est relié au projet ; active le journal des prévisions |
+| `CRON_SECRET` | Optionnel : longue valeur aléatoire ; autorise le relevé quotidien (`/api/journal/record`, lancé par Vercel Cron) |
 | `FORECAST_SERVICE_TOKEN` | Optionnel mais requis avec le service ML : secret partagé, envoyé en `Authorization: Bearer …` (même valeur des deux côtés) |
 
 Sur Vercel : *Project → Settings → Environment Variables*, mêmes noms. Changer `DASHBOARD_PASSWORD` déconnecte toutes les sessions.
@@ -59,6 +61,19 @@ Instruments actuels : or (`GOLD`), pétrole WTI (`OIL_CRUDE`), bitcoin (`BTCUSD`
 `time` est en secondes UTC ; `resolution` vaut `1`, `5` ou `15` (minutes).
 
 **Modèle intégré** (`lib/forecast/builtin.ts`) : pente d'une régression linéaire pondérée (exponentiellement) sur les 48 dernières clôtures en log, réduite de moitié ; bande = ±1,28 × volatilité récente × √pas (~80 %). La direction est « neutre » si le mouvement attendu est faible devant le bruit. Le taux de réussite est un backtest de cette même fonction sur l'historique chargé (directions neutres exclues). Aucune promesse de précision.
+
+### Journal des prévisions en direct
+
+Le backtest rejoue le passé ; le journal juge les prévisions **en conditions réelles**. Pour chaque instrument et chaque horizon, une prévision est enregistrée à l'avance par fenêtre d'horizon (donc sans chevauchement : une toutes les 30 min, une par jour, une par semaine), puis comparée au vrai prix à l'échéance, avec la même définition que le backtest (clôtures finales, bougies décalées de `horizon / résolution`).
+
+- **Où** : un fichier JSON par série dans un stockage Vercel Blob **privé** (`journal/<epic>__<résolution>__<horizon>.json`), mis à jour avec contrôle d'ETag (pas de perte en cas d'écritures simultanées), 1 500 entrées maximum par série.
+- **Quand** : à l'ouverture du graphique (route `/api/forecast`, tableau jour/semaine) et chaque jour à 7 h UTC par Vercel Cron (`/api/journal/record`, protégé par `CRON_SECRET`). L'offre gratuite de Vercel limite les tâches planifiées à une par jour : les prévisions à 30 min ne sont donc enregistrées que quand le dashboard est consulté.
+- **Affichage** : réussite avec marge d'erreur, comparaison aux stratégies naïves, verdict, et **gain simulé net** (une unité par prévision haussière ou baissière, après un spread supposé par instrument : `spreadBps` dans `config/instruments.ts`, sans frais de financement). Les statistiques sont séparées par modèle (ML / intégré). Aucun taux n'est affiché sous 20 prévisions jugées.
+- **Limites** : une entrée dont la bougie sort de l'historique chargé (1 000 bougies) avant d'avoir été jugée est marquée « expirée » et ignorée.
+
+### Calculateur de risque
+
+Dans la colonne de droite : à partir du capital, du risque par trade (1 % par défaut) et d'un stop calculé sur l'**ATR** (amplitude moyenne des 14 dernières bougies, × 1,5 par défaut, ou distance manuelle), il donne la taille de position, le stop, l'objectif (rapport gain/risque réglable), la perte maximale, le gain visé et le levier effectif, avec des alertes au-delà de 2 % de risque ou 5× de levier. Les réglages sont mémorisés sur l'appareil. Montants en devise de cotation (USD), spread non inclus.
 
 ### Lire le backtest
 
