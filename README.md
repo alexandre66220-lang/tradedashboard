@@ -18,6 +18,8 @@ Copiez `.env.example` en `.env.local` (jamais commité) et renseignez :
 | `FORECAST_SERVICE_URL` | Optionnel : URL du service de prévision ML (`https://…/api/forecast`), voir `forecast-service/README.md` |
 | `BLOB_READ_WRITE_TOKEN` | Optionnel : ajouté automatiquement par Vercel quand un stockage Blob (privé) est relié au projet ; active le journal des prévisions |
 | `CALENDAR_FEED_URL` | Optionnel : adresse du calendrier économique (défaut : le flux hebdomadaire gratuit de Fair Economy, format ForexFactory) |
+| `NTFY_TOPIC` | Optionnel : nom **long et aléatoire** du sujet [ntfy](https://ntfy.sh) sur lequel envoyer les alertes ; il sert de mot de passe, ne le partagez pas. Active les alertes sur téléphone |
+| `NTFY_SERVER`, `NTFY_TOKEN`, `DASHBOARD_URL` | Optionnels : serveur ntfy auto-hébergé (défaut `https://ntfy.sh`), jeton d'accès à ce serveur, adresse ouverte en touchant la notification |
 | `CRON_SECRET` | Optionnel : longue valeur aléatoire ; autorise le relevé quotidien (`/api/journal/record`, lancé par Vercel Cron) |
 | `FORECAST_SERVICE_TOKEN` | Optionnel mais requis avec le service ML : secret partagé, envoyé en `Authorization: Bearer …` (même valeur des deux côtés) |
 
@@ -101,6 +103,19 @@ Panneau « Annonces à venir » (colonne de droite) et feu rouge autour des gros
 Panneau « Sentiment des clients » : part des clients de Capital.com acheteurs ou vendeurs sur l'instrument (`GET /api/v1/clientsentiment?marketIds=…`, donnée de marché publique en lecture seule, ajoutée à la liste des appels autorisés), rafraîchie toutes les 60 s côté serveur. Les valeurs qui ne forment pas 100 % sont ignorées plutôt que devinées ; si l'appel échoue ou ne connaît pas le marché, le panneau affiche « non disponible » et l'appel n'est pas répété avant 5 min.
 
 Ce sentiment **n'est pas une entrée du modèle** : l'API ne donne que la valeur du moment, sans historique, donc impossible de l'apprendre sur le passé. À la place, il est enregistré avec chaque prévision du journal, qui compare ensuite la réussite quand la prévision va dans le sens de la foule (≥ 60 % d'un côté), à contre-courant, ou quand la foule est partagée. Si un écart net apparaît au bout de plusieurs semaines, il pourra devenir une variable du modèle.
+
+### Alertes sur téléphone
+
+Notifications push gratuites via [ntfy](https://ntfy.sh) (aucun compte : l'application s'abonne à un « sujet » secret). Trois types d'alertes :
+- **35 minutes avant une annonce économique majeure** (une seule fois par annonce, avec les instruments concernés) ;
+- **stop ou objectif touché** sur un trade que vous avez noté comme ouvert dans « Mes trades » (stop = priorité urgente), avec le rappel de noter la clôture ;
+- **prix fixé par vous** (au-dessus / en dessous), créé dans le panneau « Alertes sur téléphone » ; l'alerte se déclenche une fois.
+
+Fonctionnement : `GET /api/alerts/check`, protégé par `Authorization: Bearer $CRON_SECRET` (refuse tout si le secret manque), compare les bougies d'1 minute depuis la création de l'alerte ou l'ouverture du trade (un pic entre deux vérifications est donc détecté), envoie, et mémorise ce qui a été envoyé (`alerts/sent.json`, 14 jours) pour ne jamais notifier deux fois ; un envoi raté est retenté à la vérification suivante. Les alertes de prix sont dans `alerts/alerts.json` (Blob privé). Le nom du sujet n'est jamais journalisé. Routes pour le panneau : `GET/POST /api/alerts`, `DELETE /api/alerts/[id]`, `POST /api/alerts/test`.
+
+**Mise en place** : 1) installez l'application ntfy et abonnez-vous à votre sujet ; 2) ajoutez `NTFY_TOPIC` (même nom) et `CRON_SECRET` dans les variables Vercel, redéployez ; 3) l'offre gratuite de Vercel ne lance une tâche qu'une fois par jour : créez sur [cron-job.org](https://cron-job.org) (gratuit) une tâche toutes les 5 minutes sur `https://<votre-site>/api/alerts/check` avec l'en-tête `Authorization: Bearer <CRON_SECRET>` ; 4) bouton « Envoyer une notification de test » du panneau.
+
+Limite : une alerte n'est pas un stop chez votre courtier ; le délai dépend de la fréquence de la tâche. Une prévision « forte » n'envoie volontairement pas d'alerte : sans avantage mesuré, cela pousserait à trader trop.
 
 ### Calculateur de risque
 

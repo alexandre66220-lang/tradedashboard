@@ -192,3 +192,10 @@ button.mini { padding: 0 6px; margin-left: 8px; min-height: 0; font-size: 12px; 
 .sent-long { background: var(--up); }
 .sent-short { background: var(--down); }
 .sent-read { margin: 8px 0 0; }
+
+.steps { margin: 8px 0; padding-left: 20px; font-size: 13px; }
+.steps li { margin: 6px 0; }
+
+.rc-grid > * { min-width: 0; }
+.rc-grid.one { grid-template-columns: 1fr; }
+@media (min-width: 900px) { .rc-grid.one { grid-template-columns: 1fr 1fr; } }
