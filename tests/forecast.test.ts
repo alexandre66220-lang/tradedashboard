@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { backtest, builtinForecast, directionOf, fitModel } from "@/lib/forecast/builtin";
+import { backtest, builtinForecast, directionOf, fitModel, hitStat } from "@/lib/forecast/builtin";
+import { verdict } from "@/lib/verdict";
 import type { Candle } from "@/lib/types";
 
 function makeCandles(closes: number[], step = 300): Candle[] {
@@ -59,5 +60,33 @@ describe("robustness", () => {
     const f = builtinForecast({ epic: "OIL_CRUDE", resolution: "DAY", resolutionMinutes: 1440, horizon: 1440, candles: makeCandles(closes, 86400) });
     expect(f.points).toEqual([]);
     expect(backtest(makeCandles(closes, 86400), 1).samples).toBeLessThan(20);
+  });
+});
+
+describe("backtest statistics", () => {
+  it("reports a wider margin when horizons overlap", () => {
+    expect(hitStat(55, 100, 1).margin!).toBeCloseTo(0.098, 2);
+    expect(hitStat(55, 100, 6).margin!).toBeGreaterThan(hitStat(55, 100, 1).margin!);
+    expect(hitStat(5, 10).hitRate).toBeNull();
+  });
+
+  it("scores baselines and confidence buckets on the same cases", () => {
+    const r = rng(3);
+    const closes = Array.from({ length: 400 }, (_, i) => 1000 + i * 0.5 + r() * 3);
+    const bt = backtest(makeCandles(closes), 3);
+    expect(bt.baselines.alwaysUp.samples).toBe(bt.samples);
+    expect(bt.baselines.alwaysUp.hitRate!).toBeGreaterThan(0.8);
+    const counts = bt.byConfidence.map((c) => c.samples);
+    expect([...counts].sort((a, b) => b - a)).toEqual(counts);
+    expect(counts[0]).toBeLessThanOrEqual(bt.samples);
+  });
+
+  it("gives an honest verdict", () => {
+    const base = { baselines: { alwaysUp: { hitRate: 0.5, samples: 500, margin: 0.04 }, lastMove: { hitRate: 0.5, samples: 500, margin: 0.04 } } };
+    expect(verdict({ hitRate: 0.52, samples: 500, margin: 0.09, ...base }).level).toBe("none");
+    expect(verdict({ hitRate: 0.62, samples: 500, margin: 0.04, ...base }).level).toBe("edge");
+    expect(verdict({ hitRate: 0.4, samples: 500, margin: 0.04, ...base }).level).toBe("worse");
+    expect(verdict({ hitRate: 0.62, samples: 500, margin: 0.04, baselines: { ...base.baselines, alwaysUp: { hitRate: 0.7, samples: 500, margin: 0.04 } } }).level).toBe("naive");
+    expect(verdict({ hitRate: null, samples: 3, margin: null }).level).toBe("unknown");
   });
 });

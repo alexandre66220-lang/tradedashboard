@@ -50,6 +50,7 @@ async function buildOutlook(): Promise<OutlookResponse> {
               confidence: f.confidence,
               backtestHitRate: f.backtestHitRate,
               backtestSamples: f.backtestSamples,
+              backtest: f.backtest,
             };
             item.horizons[o.key] = cell;
           } catch (err) {

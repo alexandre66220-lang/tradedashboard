@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { OUTLOOKS } from "@/config/instruments";
 import type { ApiError, OutlookCell, OutlookResponse } from "@/lib/types";
+import { verdict } from "@/lib/verdict";
+import { fmtHit } from "./BacktestDetails";
 
 const POLL_MS = 60_000;
 const ARROW = { up: "▲", down: "▼", flat: "▶" } as const;
@@ -22,12 +24,16 @@ function Cell({ cell }: { cell: OutlookCell | { error: string } | undefined }) {
     );
   }
   return (
-    <td title={`Cible ${price(cell.target)} (fourchette ${price(cell.low)} – ${price(cell.high)}) · confiance ${pct(cell.confidence)}`}>
+    <td
+      title={`Cible ${price(cell.target)} (fourchette ${price(cell.low)} – ${price(cell.high)}) · confiance ${pct(cell.confidence)}${
+        cell.backtest ? ` · ${verdict(cell.backtest).label}` : ""
+      }`}
+    >
       <span className={`dir-${cell.direction}`}>
         {ARROW[cell.direction]} {pct(cell.change, true)}
       </span>
-      <span className="muted small block">
-        réussite {cell.backtestHitRate == null ? "—" : `${Math.round(cell.backtestHitRate * 100)} %`}
+      <span className={`small block hit-${cell.backtest ? verdict(cell.backtest).level : "unknown"}`}>
+        {cell.backtest ? fmtHit(cell.backtest) : cell.backtestHitRate == null ? "—" : `${Math.round(cell.backtestHitRate * 100)} %`}
       </span>
     </td>
   );
@@ -111,8 +117,9 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
       {data && error && <p className="muted small">Mise à jour impossible : {error}</p>}
       <p className="disclaimer">
         Variation attendue sur la prochaine bougie journalière / hebdomadaire, même modèle statistique
-        {data?.source ? ` (${data.source})` : ""}. « Réussite » = part de directions correctes en backtest sur l’historique
-        disponible. Touchez une ligne pour afficher l’instrument.
+        {data?.source ? ` (${data.source})` : ""}. En petit : réussite du backtest (part de directions correctes) sur l’historique
+        disponible, avec sa marge d’erreur (vert : mieux que le hasard, rouge : moins bon). Touchez une ligne pour afficher
+        l’instrument.
       </p>
     </section>
   );

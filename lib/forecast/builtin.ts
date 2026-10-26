@@ -1,4 +1,4 @@
-import type { Candle, ForecastPoint, ForecastResponse } from "../types";
+import type { BacktestStats, Candle, ForecastPoint, ForecastResponse, HitStat } from "../types";
 import type { ForecastProvider, ForecastRequest } from "./types";
 
 /**
@@ -14,6 +14,7 @@ const SHRINK = 0.5;
 const Z = 1.28;
 const FLAT_RATIO = 0.1;
 const MIN_BACKTEST_SAMPLES = 20;
+export const CONFIDENCE_THRESHOLDS = [0.55, 0.6, 0.65, 0.7];
 
 export interface ModelOutput {
   /** expected log move per step */
@@ -69,19 +70,49 @@ export function directionOf(model: ModelOutput, steps: number): { direction: "up
   return { direction: ratio > 0 ? "up" : "down", confidence };
 }
 
-export function backtest(candles: Candle[], steps: number): { hitRate: number | null; samples: number } {
+/**
+ * ~95 % margin of a hit rate. Consecutive predictions overlap when the horizon spans several
+ * candles, so only samples / steps of them are really independent (conservative, p = 0.5).
+ */
+export function hitStat(hits: number, samples: number, steps = 1): HitStat {
+  if (samples < MIN_BACKTEST_SAMPLES) return { hitRate: null, samples, margin: null };
+  const effective = Math.max(1, samples / Math.max(1, steps));
+  return { hitRate: hits / samples, samples, margin: Math.min(0.5, 1.96 * 0.5 / Math.sqrt(effective)) };
+}
+
+/**
+ * Replays the model on the loaded history: at each candle it only sees the WINDOW previous closes,
+ * predicts the direction `steps` candles ahead and is compared with what actually happened.
+ * Flat predictions and unchanged prices are skipped. Naive baselines are scored on the same cases.
+ */
+export function backtest(candles: Candle[], steps: number): BacktestStats {
   const closes = candles.map((c) => c.close);
-  let hits = 0, samples = 0;
-  for (let i = WINDOW - 1; i + steps < closes.length; i++) {
+  let hits = 0, samples = 0, upHits = 0, lastHits = 0;
+  const conf = CONFIDENCE_THRESHOLDS.map(() => ({ hits: 0, samples: 0 }));
+  for (let i = Math.max(WINDOW - 1, 1); i + steps < closes.length; i++) {
     const model = fitModel(closes.slice(i - WINDOW + 1, i + 1));
     if (!model) continue;
-    const { direction } = directionOf(model, steps);
+    const { direction, confidence } = directionOf(model, steps);
     const actual = closes[i + steps] - closes[i];
     if (direction === "flat" || actual === 0) continue;
+    const up = actual > 0;
+    const hit = (direction === "up") === up;
     samples++;
-    if ((direction === "up") === actual > 0) hits++;
+    if (hit) hits++;
+    if (up) upHits++;
+    if ((closes[i] - closes[i - 1] >= 0) === up) lastHits++;
+    CONFIDENCE_THRESHOLDS.forEach((t, k) => {
+      if (confidence >= t) {
+        conf[k].samples++;
+        if (hit) conf[k].hits++;
+      }
+    });
   }
-  return { hitRate: samples >= MIN_BACKTEST_SAMPLES ? hits / samples : null, samples };
+  return {
+    ...hitStat(hits, samples, steps),
+    baselines: { alwaysUp: hitStat(upHits, samples, steps), lastMove: hitStat(lastHits, samples, steps) },
+    byConfidence: CONFIDENCE_THRESHOLDS.map((t, k) => ({ minConfidence: t, ...hitStat(conf[k].hits, conf[k].samples, steps) })),
+  };
 }
 
 export function builtinForecast(req: ForecastRequest): ForecastResponse {
@@ -102,7 +133,7 @@ export function builtinForecast(req: ForecastRequest): ForecastResponse {
   }
   const { direction, confidence } = directionOf(model, steps);
   const bt = backtest(candles, steps);
-  return { points, direction, confidence, backtestHitRate: bt.hitRate, backtestSamples: bt.samples, source: "intégré" };
+  return { points, direction, confidence, backtestHitRate: bt.hitRate, backtestSamples: bt.samples, backtest: bt, source: "intégré" };
 }
 
 export const builtinProvider: ForecastProvider = {

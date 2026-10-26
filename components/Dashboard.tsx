@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_RESOLUTION, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
+import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import OutlookPanel from "./OutlookPanel";
 
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
@@ -275,11 +276,17 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
                 <div>
                   <dt>Réussite backtest</dt>
                   <dd className={forecast.backtestHitRate != null && forecast.backtestHitRate < 0.5 ? "neg" : ""}>
-                    {fmtPct(forecast.backtestHitRate)}
+                    {forecast.backtest ? fmtHit(forecast.backtest) : fmtPct(forecast.backtestHitRate)}
                     {forecast.backtestSamples ? <span className="muted small"> ({forecast.backtestSamples})</span> : null}
                   </dd>
                 </div>
               </dl>
+              {forecast.backtest && (
+                <>
+                  <VerdictBadge bt={forecast.backtest} />
+                  <BacktestDetails bt={forecast.backtest} confidence={forecast.confidence} />
+                </>
+              )}
             </>
           ) : (
             <p className="muted small">{forecastError ?? "Calcul en cours…"}</p>
