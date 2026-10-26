@@ -14,6 +14,7 @@ import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
 import TradesPanel, { type TradeDraft } from "./TradesPanel";
 import CalendarPanel from "./CalendarPanel";
+import SentimentPanel from "./SentimentPanel";
 import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
@@ -90,7 +91,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   };
 
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [meta, setMeta] = useState<Pick<CandlesResponse, "marketStatus" | "env" | "quote"> | null>(null);
+  const [meta, setMeta] = useState<Pick<CandlesResponse, "marketStatus" | "env" | "quote" | "sentiment"> | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
@@ -118,7 +119,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         if (signal.aborted) return;
         if (c.status === "fulfilled") {
           setCandles(c.value.candles);
-          setMeta({ marketStatus: c.value.marketStatus, env: c.value.env, quote: c.value.quote ?? null });
+          setMeta({ marketStatus: c.value.marketStatus, env: c.value.env, quote: c.value.quote ?? null, sentiment: c.value.sentiment ?? null });
           setError(null);
           setUpdatedAt(new Date());
         } else {
@@ -355,6 +356,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
           </p>
           </section>
+          <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
           <SlTpAdvisor
             epic={epic}
             candles={candles}

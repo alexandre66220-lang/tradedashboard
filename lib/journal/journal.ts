@@ -82,6 +82,7 @@ export async function recordForecast(
   candles: Candle[],
   forecast: Pick<ForecastResponse, "direction" | "confidence" | "points" | "source">,
   now = Date.now(),
+  sentimentLong?: number | null,
 ): Promise<boolean> {
   const last = candles.at(-1);
   const target = forecast.points.at(-1)?.value;
@@ -108,6 +109,7 @@ export async function recordForecast(
     confidence: forecast.confidence,
     target,
     source: forecast.source ?? "intégré",
+    ...(typeof sentimentLong === "number" && Number.isFinite(sentimentLong) ? { sentiment: Math.round(sentimentLong * 10) / 10 } : {}),
   };
   const wrote = await updateSeries(storage, seriesKey(series), (entries) => {
     const { entries: resolved, changed } = resolveEntries(entries, candles);
@@ -140,9 +142,19 @@ function hit(hits: number, samples: number): JournalHit {
   return { hits, samples, hitRate: hits / samples, margin: Math.min(0.5, (1.96 * 0.5) / Math.sqrt(samples)) };
 }
 
+export type CrowdRelation = "with" | "against" | "neutral";
+
+/** Was the forecast with or against the crowd? The crowd has a side only from 60 % on one side. */
+export function crowdRelation(direction: "up" | "down" | "flat", longPct: number): CrowdRelation {
+  const crowd = longPct >= 60 ? "up" : longPct <= 40 ? "down" : null;
+  if (!crowd || direction === "flat") return "neutral";
+  return direction === crowd ? "with" : "against";
+}
+
 export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) => number): JournalStats {
   let pending = 0, expired = 0, flat = 0, hits = 0, upHits = 0, lastHits = 0, evaluated = 0;
   let gross = 0, net = 0;
+  const crowd: Record<CrowdRelation, { hits: number; n: number }> = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
   const curve: JournalStats["curve"] = [];
   let first: number | null = null;
 
@@ -166,6 +178,11 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     const sign = e.direction === "up" ? 1 : -1;
     evaluated++;
     hits += (e.direction === "up") === up ? 1 : 0;
+    if (e.sentiment !== undefined) {
+      const g = crowd[crowdRelation(e.direction, e.sentiment)];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+    }
     upHits += up ? 1 : 0;
     lastHits += e.ref - e.prev >= 0 === up ? 1 : 0;
     const r = sign * (e.outcome / e.ref - 1);
@@ -181,6 +198,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     evaluated,
     model: hit(hits, evaluated),
     baselines: { alwaysUp: hit(upHits, evaluated), lastMove: hit(lastHits, evaluated) },
+    bySentiment: { with: hit(crowd.with.hits, crowd.with.n), against: hit(crowd.against.hits, crowd.against.n), neutral: hit(crowd.neutral.hits, crowd.neutral.n) },
     netReturnPct: net * 100,
     grossReturnPct: gross * 100,
     curve,

@@ -2,7 +2,7 @@
 
 Dashboard personnel de suivi de marché, **en lecture seule** : graphique en bougies (Lightweight Charts de TradingView) alimenté par l'API Capital.com, avec une prévision expérimentale prolongée dans le futur. Next.js (App Router) + TypeScript, prévu pour Vercel.
 
-> Aucune fonctionnalité de passage d'ordre. Le client Capital.com (`lib/capital.ts`) n'autorise que 3 appels : `POST /api/v1/session`, `GET /api/v1/prices/{epic}` et `GET /api/v1/markets/{epic}`. Tout autre appel est bloqué.
+> Aucune fonctionnalité de passage d'ordre. Le client Capital.com (`lib/capital.ts`) n'autorise que 4 appels : `POST /api/v1/session`, `GET /api/v1/prices/{epic}`, `GET /api/v1/markets/{epic}` et `GET /api/v1/clientsentiment` (part de clients acheteurs / vendeurs : donnée de marché publique). Tout autre appel est bloqué.
 
 ## Variables d'environnement
 
@@ -95,6 +95,12 @@ Panneau « Annonces à venir » (colonne de droite) et feu rouge autour des gros
 - **Lecture défensive** : les lignes mal formées, les jours fériés et les dates sans décalage horaire explicite sont ignorés (deviner le fuseau décalerait toutes les annonces). Si un flux d'au moins 10 lignes ne donne rien d'exploitable, le format est jugé inattendu : l'interface affiche « calendrier indisponible » au lieu de « aucune annonce », et le feu précise que les annonces ne sont pas vérifiées.
 - **Pertinence** : par instrument, `newsCurrencies` (défaut `USD`) et `newsKeywords` dans `config/instruments.ts` (par exemple `crude`, `opec` pour le pétrole : ces titres comptent comme fort impact). Impact faible ignoré.
 - **Feu** : rouge de 30 min avant à 30 min après une annonce forte, orange jusqu'à 90 min avant pour toute annonce moyenne ou forte.
+
+### Sentiment des clients
+
+Panneau « Sentiment des clients » : part des clients de Capital.com acheteurs ou vendeurs sur l'instrument (`GET /api/v1/clientsentiment?marketIds=…`, donnée de marché publique en lecture seule, ajoutée à la liste des appels autorisés), rafraîchie toutes les 60 s côté serveur. Les valeurs qui ne forment pas 100 % sont ignorées plutôt que devinées ; si l'appel échoue ou ne connaît pas le marché, le panneau affiche « non disponible » et l'appel n'est pas répété avant 5 min.
+
+Ce sentiment **n'est pas une entrée du modèle** : l'API ne donne que la valeur du moment, sans historique, donc impossible de l'apprendre sur le passé. À la place, il est enregistré avec chaque prévision du journal, qui compare ensuite la réussite quand la prévision va dans le sens de la foule (≥ 60 % d'un côté), à contre-courant, ou quand la foule est partagée. Si un écart net apparaît au bout de plusieurs semaines, il pourra devenir une variable du modèle.
 
 ### Calculateur de risque
 

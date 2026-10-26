@@ -1,6 +1,6 @@
 import "server-only";
 import { INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
-import { getCandles } from "@/lib/capital";
+import { getCandles, getSentimentFor } from "@/lib/capital";
 import type { Candle, ForecastResponse } from "@/lib/types";
 import { computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
@@ -19,7 +19,8 @@ export async function recordSafe(series: SeriesRef, candles: Candle[], forecast:
   const storage = getStorage();
   if (!storage) return;
   try {
-    await recordForecast(storage, series, candles, forecast);
+    const sentiment = await getSentimentFor(series.epic, INSTRUMENTS.map((i) => i.epic));
+    await recordForecast(storage, series, candles, forecast, Date.now(), sentiment?.long);
   } catch (err) {
     console.warn("[journal] record failed:", err instanceof Error ? err.message : "unknown");
   }

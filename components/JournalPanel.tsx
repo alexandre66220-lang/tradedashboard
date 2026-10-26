@@ -51,6 +51,12 @@ function ModelBlock({ family, st }: { family: "ml" | "builtin"; st: JournalStats
         Pour comparaison : « toujours hausse » {fmtHit(st.baselines.alwaysUp)} · « suit la dernière bougie » {fmtHit(st.baselines.lastMove)}. Avant
         spread : {st.evaluated ? fmtPct(st.grossReturnPct) : "—"}.
       </p>
+      {st.bySentiment.with.samples + st.bySentiment.against.samples + st.bySentiment.neutral.samples > 0 && (
+        <p className="muted small">
+          Selon le sentiment des clients : prévision dans le sens de la foule {fmtHit(st.bySentiment.with)} · à contre-courant{" "}
+          {fmtHit(st.bySentiment.against)} · foule partagée {fmtHit(st.bySentiment.neutral)}.
+        </p>
+      )}
       <Curve points={st.curve} label="Gains simulés cumulés" />
     </div>
   );

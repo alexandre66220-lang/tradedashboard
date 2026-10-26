@@ -16,6 +16,8 @@ export interface CandlesResponse {
   marketStatus: MarketStatus;
   /** Live bid / offer, when the broker gives them */
   quote?: { bid: number; offer: number } | null;
+  /** Share of Capital.com clients long / short, when available */
+  sentiment?: { long: number; short: number } | null;
   env: "demo" | "live";
 }
 

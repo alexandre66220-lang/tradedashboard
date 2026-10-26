@@ -19,6 +19,8 @@ export interface JournalEntry {
   target: number;
   /** Provider label shown in the UI, e.g. "ML, gradient boosting + logistique" */
   source: string;
+  /** % of Capital.com clients long when the forecast was made (not available for older entries) */
+  sentiment?: number;
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -49,6 +51,8 @@ export interface JournalStats {
   evaluated: number;
   model: JournalHit;
   baselines: { alwaysUp: JournalHit; lastMove: JournalHit };
+  /** Hit rate depending on whether the forecast agreed with the crowd (>= 60 % on one side) */
+  bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
   /** Net simulated return in %, one unit of notional per call, after the assumed spread */
   netReturnPct: number;
   grossReturnPct: number;
