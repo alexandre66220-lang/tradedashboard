@@ -2,13 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_RESOLUTION, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
+import { DEFAULT_RESOLUTION, DEFAULT_SPREAD_BPS, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
 import { averageTrueRange } from "@/lib/risk";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
+import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
 
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
 
@@ -58,6 +59,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [resolution, setResolution] = useState<ResolutionKey>(DEFAULT_RESOLUTION);
   const [horizon, setHorizon] = useState(instrument.defaultHorizon);
   const [showBand, setShowBand] = useState(true);
+  const [applied, setApplied] = useState<AppliedLevels | null>(null);
 
   const [candles, setCandles] = useState<Candle[]>([]);
   const [meta, setMeta] = useState<Pick<CandlesResponse, "marketStatus" | "env"> | null>(null);
@@ -300,7 +302,24 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
           </p>
           </section>
-          <RiskCalculator epic={epic} last={last?.close ?? null} atr={averageTrueRange(candles)} direction={forecast?.direction} decimals={decimals} />
+          <SlTpAdvisor
+            epic={epic}
+            candles={candles}
+            forecast={forecast}
+            decimals={decimals}
+            resMinutes={RESOLUTIONS[resolution].minutes}
+            horizon={horizon}
+            spreadBps={instrument.spreadBps ?? DEFAULT_SPREAD_BPS}
+            onApply={(a) => setApplied({ ...a, nonce: Date.now() })}
+          />
+          <RiskCalculator
+            epic={epic}
+            last={last?.close ?? null}
+            atr={averageTrueRange(candles)}
+            direction={forecast?.direction}
+            decimals={decimals}
+            applied={applied}
+          />
           <OutlookPanel
             selected={epic}
             onSelect={(e) => {

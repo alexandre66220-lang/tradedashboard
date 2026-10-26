@@ -75,6 +75,18 @@ Le backtest rejoue le passé ; le journal juge les prévisions **en conditions r
 
 Dans la colonne de droite : à partir du capital, du risque par trade (1 % par défaut) et d'un stop calculé sur l'**ATR** (amplitude moyenne des 14 dernières bougies, × 1,5 par défaut, ou distance manuelle), il donne la taille de position, le stop, l'objectif (rapport gain/risque réglable), la perte maximale, le gain visé et le levier effectif, avec des alertes au-delà de 2 % de risque ou 5× de levier. Les réglages sont mémorisés sur l'appareil. Montants en devise de cotation (USD), spread non inclus.
 
+### Conseil SL / TP
+
+Panneau « Conseil SL / TP » (colonne de droite), calculé dans le navigateur à partir des bougies déjà chargées, sans nouvelle route :
+
+- **Stop** : juste au-delà du dernier creux (achat) ou sommet (vente) détecté sur l'historique récent (pivot confirmé par 3 bougies de chaque côté, niveaux proches regroupés), avec une marge de 0,25 ATR ; entre 0,8 et 3,5 ATR de l'entrée. Sinon 1,5 ATR.
+- **Objectifs proposés** : avant le prochain sommet / creux, cible de la prévision du modèle (si elle va dans le sens du trade), et 1, 1,5, 2 et 3 fois le risque. Réglage conseillé (★) : le niveau ou la cible du modèle si son rapport gain/risque est entre 1,5 et 3,5, sinon 1,5 fois le risque.
+- **Test sur l'historique** : chaque réglage est rejoué à partir de chaque bougie (entrée à la clôture, sortie au stop, à l'objectif ou après `3 × horizon`) : part touchant l'objectif avant le stop, espérance en R après spread (`spreadBps`), marge d'erreur qui compte une seule fois les entrées qui se chevauchent. Si une bougie touche le stop et l'objectif, le stop est supposé touché en premier. Le même test est fait dans l'autre sens pour repérer l'effet de la tendance récente.
+- **Alertes** : prochain obstacle trop proche (moins de 1 fois le risque), stop très large.
+- Le bouton « Utiliser dans le calculateur de risque » reporte la distance du stop, le rapport gain/risque et le sens dans le calculateur.
+
+À retenir : sur un prix sans tendance, aucun couple stop/objectif ne crée d'avantage (l'espérance reste égale à moins les frais, ce que vérifie un test). Cet outil sert à placer le risque intelligemment, pas à le faire gagner.
+
 ### Lire le backtest
 
 Chaque prévision affiche sa réussite avec une **marge d'erreur à ~95 %** (`51 % ± 10`), puis un verdict :

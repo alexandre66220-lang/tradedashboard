@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { sizePosition } from "@/lib/risk";
+import type { AppliedLevels } from "./SlTpAdvisor";
 
 interface Props {
   epic: string;
@@ -9,6 +10,8 @@ interface Props {
   atr: number | null;
   direction?: "up" | "down" | "flat";
   decimals: number;
+  /** Levels sent by the SL/TP advisor */
+  applied?: AppliedLevels | null;
 }
 
 function load(key: string, fallback: string): string {
@@ -29,7 +32,7 @@ function save(key: string, value: string) {
 const num = (s: string) => Number(s.replace(",", "."));
 const money = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 
-export default function RiskCalculator({ epic, last, atr, direction, decimals }: Props) {
+export default function RiskCalculator({ epic, last, atr, direction, decimals, applied }: Props) {
   const [capital, setCapital] = useState("1000");
   const [riskPct, setRiskPct] = useState("1");
   const [ratio, setRatio] = useState("2");
@@ -49,6 +52,13 @@ export default function RiskCalculator({ epic, last, atr, direction, decimals }:
     if (direction === "down") setSide("short");
   }, [direction, epic]);
   useEffect(() => setManualStop(""), [epic]);
+  useEffect(() => {
+    if (!applied) return;
+    setManualStop(String(Number(applied.distance.toFixed(decimals))));
+    setRatio(String(Math.round(applied.ratio * 100) / 100));
+    setSide(applied.side);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied?.nonce]);
 
   const stopDistance = manualStop !== "" ? num(manualStop) : atr != null ? atr * num(atrMult) : NaN;
   const res =
