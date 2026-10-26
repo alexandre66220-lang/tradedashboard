@@ -5,6 +5,8 @@ import { runForecast } from "@/lib/forecast";
 import { handleError, jsonError, parseCommon } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
+// An external ML model may need a few seconds (cold start + training).
+export const maxDuration = 60;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);

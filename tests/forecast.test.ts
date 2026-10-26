@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetForecastCache, runForecast } from "@/lib/forecast";
 import { backtest, builtinForecast, directionOf, fitModel, hitStat } from "@/lib/forecast/builtin";
 import { verdict } from "@/lib/verdict";
 import type { Candle } from "@/lib/types";
@@ -88,5 +89,74 @@ describe("backtest statistics", () => {
     expect(verdict({ hitRate: 0.4, samples: 500, margin: 0.04, ...base }).level).toBe("worse");
     expect(verdict({ hitRate: 0.62, samples: 500, margin: 0.04, baselines: { ...base.baselines, alwaysUp: { hitRate: 0.7, samples: 500, margin: 0.04 } } }).level).toBe("naive");
     expect(verdict({ hitRate: null, samples: 3, margin: null }).level).toBe("unknown");
+  });
+});
+
+describe("external provider cache", () => {
+  const req = (lastTime: number) => ({
+    epic: "GOLD",
+    resolution: "MINUTE_5",
+    resolutionMinutes: 5,
+    horizon: 30,
+    candles: makeCandles(Array.from({ length: 120 }, (_, i) => 2000 + Math.sin(i / 7) * 5 + i * 0.1)).map((c, i, a) =>
+      i === a.length - 1 ? { ...c, time: lastTime } : c,
+    ),
+  });
+  const ok = {
+    points: [{ time: 1, value: 2, low: 1, high: 3 }],
+    direction: "up",
+    confidence: 0.6,
+    backtestHitRate: 0.55,
+    source: "ml-test",
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    process.env.FORECAST_SERVICE_URL = "http://ml.test/api/forecast";
+    __resetForecastCache();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    delete process.env.FORECAST_SERVICE_URL;
+  });
+
+  it("calls the service once per latest candle, not on every poll", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ok }));
+    vi.stubGlobal("fetch", fetchMock);
+    await Promise.all([runForecast(req(1000)), runForecast(req(1000))]);
+    await runForecast(req(1000));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await runForecast(req(1300)); // a new candle
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(new Date("2026-01-01T00:02:00Z")); // past the 60 s TTL
+    await runForecast(req(1300));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to the built-in model, and does not hammer a failing service", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await runForecast(req(1000));
+    expect(r.source).toContain("service externe indisponible");
+    expect(r.points.length).toBeGreaterThan(0);
+    await runForecast(req(1000));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(new Date("2026-01-01T00:00:40Z")); // failure cache is 30 s
+    await runForecast(req(1000));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends the bearer token and rejects an invalid payload", async () => {
+    process.env.FORECAST_SERVICE_TOKEN = "tok";
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ nope: 1 }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await runForecast(req(1000));
+    expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: "Bearer tok" });
+    expect(r.source).toContain("indisponible");
+    delete process.env.FORECAST_SERVICE_TOKEN;
   });
 });

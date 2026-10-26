@@ -15,8 +15,8 @@ Copiez `.env.example` en `.env.local` (jamais commité) et renseignez :
 | `CAPITAL_API_PASSWORD` | Mot de passe **de la clé API** (défini à sa création) |
 | `CAPITAL_ENV` | `demo` (défaut) ou `live` |
 | `DASHBOARD_PASSWORD` | Mot de passe unique du site. S'il est absent, le site entier est verrouillé (503) |
-| `FORECAST_SERVICE_URL` | Optionnel : URL d'un service de prévision externe |
-| `FORECAST_SERVICE_TOKEN` | Optionnel : envoyé en `Authorization: Bearer …` au service externe |
+| `FORECAST_SERVICE_URL` | Optionnel : URL du service de prévision ML (`https://…/api/forecast`), voir `forecast-service/README.md` |
+| `FORECAST_SERVICE_TOKEN` | Optionnel mais requis avec le service ML : secret partagé, envoyé en `Authorization: Bearer …` (même valeur des deux côtés) |
 
 Sur Vercel : *Project → Settings → Environment Variables*, mêmes noms. Changer `DASHBOARD_PASSWORD` déconnecte toutes les sessions.
 
@@ -74,7 +74,11 @@ La marge tient compte du chevauchement des horizons : à 30 min en bougies de 5 
 
 `GET /api/outlook` calcule, pour chaque instrument, la prévision de la prochaine bougie journalière (`DAY`) et hebdomadaire (`WEEK`) avec le même modèle et son propre backtest. Il renvoie la variation attendue, la cible, la fourchette et le taux de réussite. Les bougies longues sont gardées en cache 5 min et le résultat 1 min. Si un epic est invalide, seule sa ligne affiche « indisponible ».
 
-### Brancher un service externe
+### Modèle de machine learning (`forecast-service/`)
+
+Le dossier `forecast-service/` contient un service Python (gradient boosting + régression logistique, backtest walk-forward sans fuite du futur) à déployer comme **second projet Vercel** : voir `forecast-service/README.md`. Une fois `FORECAST_SERVICE_URL` et `FORECAST_SERVICE_TOKEN` définis, le dashboard l'utilise à la place du modèle intégré, avec les mêmes verdicts et comparaisons. Les réponses sont gardées en cache par instrument, horizon et dernière bougie (1 à 15 min), et un échec du service est mis en cache 30 s pour ne pas le solliciter à chaque rafraîchissement.
+
+### Brancher un autre service externe
 
 Définissez `FORECAST_SERVICE_URL`. L'endpoint lui envoie alors un `POST` JSON :
 

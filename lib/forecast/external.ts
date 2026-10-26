@@ -26,7 +26,8 @@ export function externalProvider(url: string): ForecastProvider {
         headers,
         body: JSON.stringify(req),
         cache: "no-store",
-        signal: AbortSignal.timeout(8_000),
+        // Training + backtest can take a few seconds, more on a cold start.
+        signal: AbortSignal.timeout(25_000),
       });
       if (!res.ok) throw new Error(`external forecast service returned ${res.status}`);
       const body: unknown = await res.json();
