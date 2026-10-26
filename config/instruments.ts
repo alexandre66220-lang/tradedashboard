@@ -5,13 +5,15 @@ export interface Instrument {
   epic: string;
   /** Default forecast horizon, in minutes */
   defaultHorizon: number;
+  /** Assumed round-trip cost in basis points (1 bp = 0.01 %), used by the simulated gains of the journal. Adjust to your real spread. */
+  spreadBps?: number;
 }
 
 // Add one line per instrument. The selector appears in the UI as soon as there are 2+.
 export const INSTRUMENTS: Instrument[] = [
-  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30 },
-  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30 },
-  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30 },
+  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2 },
+  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5 },
+  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8 },
 ];
 
 export const RESOLUTIONS = {
@@ -39,3 +41,6 @@ export function findInstrument(epic: string | null): Instrument | undefined {
 export function isResolutionKey(v: string | null): v is ResolutionKey {
   return v !== null && Object.prototype.hasOwnProperty.call(RESOLUTIONS, v);
 }
+
+export const DEFAULT_SPREAD_BPS = 3;
+export const spreadBpsFor = (epic: string) => INSTRUMENTS.find((i) => i.epic === epic)?.spreadBps ?? DEFAULT_SPREAD_BPS;

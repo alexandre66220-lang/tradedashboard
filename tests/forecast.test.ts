@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetForecastCache, runForecast } from "@/lib/forecast";
 import { backtest, builtinForecast, directionOf, fitModel, hitStat } from "@/lib/forecast/builtin";
+import { averageTrueRange, sizePosition } from "@/lib/risk";
 import { verdict } from "@/lib/verdict";
 import type { Candle } from "@/lib/types";
 
@@ -158,5 +159,45 @@ describe("external provider cache", () => {
     expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: "Bearer tok" });
     expect(r.source).toContain("indisponible");
     delete process.env.FORECAST_SERVICE_TOKEN;
+  });
+});
+
+describe("risk calculator", () => {
+  const base = { capital: 1000, riskPct: 1, entry: 2000, stopDistance: 10, side: "long" as const, rewardRatio: 2 };
+
+  it("sizes the position so that the stop costs the chosen risk", () => {
+    const r = sizePosition(base);
+    if ("error" in r) throw new Error(r.error);
+    expect(r.units).toBe(1); // 10 $ risked / 10 $ stop distance
+    expect(r.stop).toBe(1990);
+    expect(r.takeProfit).toBe(2020); // 2000 + 2 x 10
+    expect(r.maxLoss).toBeCloseTo(10);
+    expect(r.potentialGain).toBeCloseTo(20);
+    expect(r.leverage).toBeCloseTo(2);
+  });
+
+  it("mirrors levels for a short and rounds the size down", () => {
+    const r = sizePosition({ ...base, side: "short", stopDistance: 7 });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.units).toBe(1.42); // 10 / 7 = 1.428...
+    expect(r.stop).toBe(2007);
+    expect(r.takeProfit).toBe(1986);
+    expect(r.maxLoss).toBeLessThanOrEqual(10);
+  });
+
+  it("warns on high risk or leverage and rejects bad input", () => {
+    const r = sizePosition({ ...base, riskPct: 5, stopDistance: 2 });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.warnings.length).toBe(2);
+    expect("error" in sizePosition({ ...base, stopDistance: NaN })).toBe(true);
+    expect("error" in sizePosition({ ...base, capital: 0 })).toBe(true);
+    expect("error" in sizePosition({ ...base, capital: 1, stopDistance: 1000 })).toBe(true);
+  });
+
+  it("computes the ATR on completed candles only", () => {
+    const cs = Array.from({ length: 20 }, (_, i) => ({ high: 102 + i * 0, low: 100, close: 101 }));
+    cs[19] = { high: 500, low: 1, close: 250 }; // forming candle: ignored
+    expect(averageTrueRange(cs)).toBeCloseTo(2);
+    expect(averageTrueRange(cs.slice(0, 5))).toBeNull();
   });
 });

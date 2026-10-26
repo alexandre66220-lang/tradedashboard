@@ -3,9 +3,12 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_RESOLUTION, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
+import { averageTrueRange } from "@/lib/risk";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
+import JournalPanel from "./JournalPanel";
 import OutlookPanel from "./OutlookPanel";
+import RiskCalculator from "./RiskCalculator";
 
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
 
@@ -297,6 +300,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
           </p>
           </section>
+          <RiskCalculator epic={epic} last={last?.close ?? null} atr={averageTrueRange(candles)} direction={forecast?.direction} decimals={decimals} />
           <OutlookPanel
             selected={epic}
             onSelect={(e) => {
@@ -306,6 +310,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           />
         </aside>
       </div>
+      <JournalPanel />
     </main>
   );
 }

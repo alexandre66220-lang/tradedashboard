@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { RESOLUTIONS } from "@/config/instruments";
 import { getCandles } from "@/lib/capital";
 import { runForecast } from "@/lib/forecast";
 import { handleError, jsonError, parseCommon } from "@/lib/http";
+import { recordSafe } from "@/lib/journal/service";
 
 export const dynamic = "force-dynamic";
 // An external ML model may need a few seconds (cold start + training).
@@ -25,6 +26,8 @@ export async function GET(req: Request) {
       horizon,
       candles,
     });
+    const series = { epic: p.instrument.epic, resolution: p.api, resMinutes: RESOLUTIONS[p.resolution].minutes, horizon };
+    after(() => recordSafe(series, candles, result));
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return handleError(err);

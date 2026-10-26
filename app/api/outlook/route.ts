@@ -3,6 +3,7 @@ import { INSTRUMENTS, OUTLOOKS } from "@/config/instruments";
 import { CapitalError, getCandles } from "@/lib/capital";
 import { runForecast } from "@/lib/forecast";
 import { handleError } from "@/lib/http";
+import { recordSafe } from "@/lib/journal/service";
 import type { OutlookCell, OutlookItem, OutlookResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,7 @@ async function buildOutlook(): Promise<OutlookResponse> {
               throw new CapitalError("NO_DATA", "Historique insuffisant pour cette prévision.");
             }
             source ??= f.source;
+            await recordSafe({ epic: inst.epic, resolution: o.api, resMinutes: o.minutes, horizon: o.minutes }, candles, f);
             const cell: OutlookCell = {
               change: end.value / last.close - 1,
               target: end.value,
