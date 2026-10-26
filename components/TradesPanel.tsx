@@ -5,6 +5,7 @@ import type { Instrument } from "@/config/instruments";
 import type { NewTradeInput } from "@/lib/useTrades";
 import { isClosed, tradePnl, tradeR, tradeStats, type Trade, type TradePatch, type TradeSide } from "@/lib/trades";
 import Curve from "./Curve";
+import Disclaimer from "./Disclaimer";
 
 export interface TradeDraft {
   epic: string;
@@ -316,10 +317,10 @@ export default function TradesPanel(p: Props) {
         </>
       )}
 
-      <p className="disclaimer">
+      <Disclaimer>
         Journal personnel, saisi à la main : le dashboard ne passe aucun ordre. Résultats en devise de cotation (USD), avant frais de financement.
         Aucun taux n’est affiché sous 20 trades clôturés. Ce n’est pas un conseil d’investissement.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

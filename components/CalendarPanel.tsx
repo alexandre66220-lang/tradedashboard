@@ -1,6 +1,7 @@
 "use client";
 
 import { countdown, relevantEvents, type CalendarEvent, type NewsProfile } from "@/lib/calendar";
+import Disclaimer from "./Disclaimer";
 
 interface Props {
   events: CalendarEvent[] | null;
@@ -48,11 +49,11 @@ export default function CalendarPanel({ events, stale, error, profile, name }: P
           ))}
         </ul>
       )}
-      <p className="disclaimer">
+      <Disclaimer>
         Annonces économiques d’impact moyen ou fort qui font bouger cet instrument ({currencies}
         {profile.newsKeywords?.length ? ` + titres contenant « ${profile.newsKeywords.join(" », « ")} »` : ""}). Autour d’une annonce forte, les prix
         sautent et le spread s’élargit : le feu passe au rouge 30 minutes avant et après. Source externe gratuite, les horaires peuvent changer.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

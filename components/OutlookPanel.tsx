@@ -5,6 +5,7 @@ import { OUTLOOKS } from "@/config/instruments";
 import type { ApiError, OutlookCell, OutlookResponse } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
 import { fmtHit } from "./BacktestDetails";
+import Disclaimer from "./Disclaimer";
 
 const POLL_MS = 60_000;
 const ARROW = { up: "▲", down: "▼", flat: "▶" } as const;
@@ -115,12 +116,12 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
         <p className="muted small">{error ?? "Calcul en cours…"}</p>
       )}
       {data && error && <p className="muted small">Mise à jour impossible : {error}</p>}
-      <p className="disclaimer">
+      <Disclaimer>
         Variation attendue sur la prochaine bougie journalière / hebdomadaire, même modèle
         {data?.source ? ` (${data.source})` : ""}. En petit : réussite du backtest (part de directions correctes) sur l’historique
         disponible, avec sa marge d’erreur (vert : mieux que le hasard, rouge : moins bon). Touchez une ligne pour afficher
         l’instrument.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

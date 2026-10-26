@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_RESOLUTION, DEFAULT_SPREAD_BPS, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
 import { averageTrueRange } from "@/lib/risk";
 import { tradeStats } from "@/lib/trades";
@@ -17,10 +17,12 @@ import TradesPanel, { type TradeDraft } from "./TradesPanel";
 import AlertsPanel from "./AlertsPanel";
 import CalendarPanel from "./CalendarPanel";
 import SentimentPanel from "./SentimentPanel";
+import TabBar, { type TabId } from "./TabBar";
 import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
+import Disclaimer from "./Disclaimer";
 
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
 
@@ -81,6 +83,28 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
   const [dailyLimit, setDailyLimitState] = useState<number | null>(null);
+  const [tab, setTab] = useState<TabId>("forecast");
+  const [isDesktop, setIsDesktop] = useState(false);
+  const panelsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const saved = readRaw("tab");
+    if (saved === "forecast" || saved === "trade" || saved === "journal" || saved === "alerts") setTab(saved);
+    const mq = window.matchMedia("(min-width: 900px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // On desktop the forecast is always shown next to the chart, so the tabs only cover the other sections
+  const activeTab: TabId = isDesktop && tab === "forecast" ? "trade" : tab;
+  const changeTab = (t: TabId) => {
+    setTab(t);
+    writePref("tab", t);
+    // on a phone, bring the section into view (the chart stays one swipe up)
+    requestAnimationFrame(() => {
+      if (window.matchMedia("(max-width: 899px)").matches) panelsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
   const tradeLog = useTrades();
   const calendar = useCalendar();
   const priceAlerts = useAlerts();
@@ -315,7 +339,11 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           <PriceChart candles={candles} forecast={forecast} showBand={showBand} viewKey={`${epic}|${resolution}|${horizon}`} />
         </div>
 
-        <aside className="side">
+
+        <TabBar tab={activeTab} onTab={changeTab} light={light.light} />
+
+        <div className="tabpanels" ref={panelsRef}>
+          <div role="tabpanel" id="panel-forecast" aria-labelledby="tab-forecast" className="tabpanel tp-forecast" hidden={!isDesktop && activeTab !== "forecast"}>
           <section className="panel">
           <div className="panel-head">
             <span>Prévision {horizon} min</span>
@@ -354,12 +382,21 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             <p className="muted small">{forecastError ?? "Calcul en cours…"}</p>
           )}
           {forecast && forecastError && <p className="muted small">Dernière prévision conservée : {forecastError}</p>}
-          <p className="disclaimer">
+          <Disclaimer>
             Prévision expérimentale{forecast?.source ? ` (modèle : ${forecast.source})` : ""}. Le taux de réussite indique la part
             de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
-          </p>
+          </Disclaimer>
           </section>
+          <OutlookPanel
+            selected={epic}
+            onSelect={(e) => {
+              selectEpic(e);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
           <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
+          </div>
+          <div role="tabpanel" id="panel-trade" aria-labelledby="tab-trade" className="tabpanel" hidden={activeTab !== "trade"}>
           <SlTpAdvisor
             epic={epic}
             candles={candles}
@@ -379,19 +416,12 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             applied={applied}
             onLog={(d) => {
               setDraft({ ...d, epic, nonce: Date.now() });
-              setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth" }), 100);
+              changeTab("journal");
+              setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
             }}
           />
-          <CalendarPanel events={calendar.events} stale={calendar.stale} error={calendar.error} profile={instrument} name={instrument.name} />
-          <OutlookPanel
-            selected={epic}
-            onSelect={(e) => {
-              selectEpic(e);
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-          />
-        </aside>
-      </div>
+          </div>
+          <div role="tabpanel" id="panel-journal" aria-labelledby="tab-journal" className="tabpanel" hidden={activeTab !== "journal"}>
       <TradesPanel
         trades={tradeLog.trades}
         configured={tradeLog.configured}
@@ -408,6 +438,10 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         onPatch={tradeLog.patch}
         onRemove={tradeLog.remove}
       />
+      <JournalPanel />
+          </div>
+          <div role="tabpanel" id="panel-alerts" aria-labelledby="tab-alerts" className="tabpanel" hidden={activeTab !== "alerts"}>
+          <CalendarPanel events={calendar.events} stale={calendar.stale} error={calendar.error} profile={instrument} name={instrument.name} />
       <AlertsPanel
         alerts={priceAlerts.alerts}
         configured={priceAlerts.configured}
@@ -420,7 +454,10 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         onRemove={priceAlerts.remove}
         onTest={priceAlerts.test}
       />
-      <JournalPanel />
+          </div>
+        </div>
+      </div>
+      <footer className="foot">Outil personnel d’information, expérimental : il ne passe aucun ordre et ne constitue pas un conseil d’investissement.</footer>
     </main>
   );
 }

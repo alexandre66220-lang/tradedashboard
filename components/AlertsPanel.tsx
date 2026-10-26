@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Instrument } from "@/config/instruments";
 import type { AlertOp, PriceAlert } from "@/lib/alerts";
+import Disclaimer from "./Disclaimer";
 
 interface Props {
   alerts: PriceAlert[];
@@ -166,10 +167,10 @@ export default function AlertsPanel(p: Props) {
         {testMsg && <p className={testMsg.ok ? "muted small" : "rc-warn"}>{testMsg.text}</p>}
       </details>
 
-      <p className="disclaimer">
+      <Disclaimer>
         Les alertes arrivent avec quelques minutes de décalage au plus (selon la fréquence de la tâche planifiée) : ne remplacez pas un vrai stop chez
         votre courtier par une alerte. Ce n’est pas un conseil d’investissement.
-      </p>
+      </Disclaimer>
     </section>
   );
 }

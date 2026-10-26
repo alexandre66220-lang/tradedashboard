@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { adviseSlTp, significance, type Advice, type Candidate, type ExitStats, type Side } from "@/lib/sltp";
 import type { Candle, ForecastResponse } from "@/lib/types";
+import Disclaimer from "./Disclaimer";
 
 export interface AppliedLevels {
   distance: number;
@@ -176,13 +177,13 @@ export default function SlTpAdvisor({ epic, candles, forecast, decimals, resMinu
         </>
       )}
 
-      <p className="disclaimer">
+      <Disclaimer>
         Le stop est placé au-delà du dernier creux (achat) ou sommet (vente), avec une marge, sinon à 1,5 ATR ; les objectifs viennent du prochain
         niveau, de la prévision du modèle ou d’un multiple du risque. Le test rejoue chaque réglage à partir de chaque bougie de l’historique
         chargé ; si une bougie touche le stop et l’objectif, le stop est supposé touché en premier. La marge d’erreur compte une seule fois les
         entrées qui se chevauchent. Comparer plusieurs objectifs sur le même historique peut flatter l’un d’eux : méfiez-vous d’un seul bon
         résultat. Ce n’est pas un conseil d’investissement.
-      </p>
+      </Disclaimer>
     </section>
   );
 }
