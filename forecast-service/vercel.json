@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/forecast.py": {
+      "maxDuration": 60,
+      "includeFiles": "forecast_core.py",
+      "excludeFiles": "{tests/**,**/__pycache__/**}"
+    }
+  }
+}

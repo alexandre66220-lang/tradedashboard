@@ -293,9 +293,8 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           )}
           {forecast && forecastError && <p className="muted small">Dernière prévision conservée : {forecastError}</p>}
           <p className="disclaimer">
-            Prévision expérimentale issue d’un modèle statistique simple{forecast?.source ? ` (${forecast.source})` : ""}. Le taux de
-            réussite indique la part de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil
-            d’investissement.
+            Prévision expérimentale{forecast?.source ? ` (modèle : ${forecast.source})` : ""}. Le taux de réussite indique la part
+            de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
           </p>
           </section>
           <OutlookPanel

@@ -6,6 +6,8 @@ import { handleError } from "@/lib/http";
 import type { OutlookCell, OutlookItem, OutlookResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// An external ML model may need a few seconds (cold start + training).
+export const maxDuration = 60;
 
 // Daily/weekly candles move slowly: refresh them every 5 min, the whole outlook every minute.
 const CANDLES_TTL_MS = 5 * 60_000;

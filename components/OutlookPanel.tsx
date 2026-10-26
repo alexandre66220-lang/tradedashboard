@@ -116,7 +116,7 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
       )}
       {data && error && <p className="muted small">Mise à jour impossible : {error}</p>}
       <p className="disclaimer">
-        Variation attendue sur la prochaine bougie journalière / hebdomadaire, même modèle statistique
+        Variation attendue sur la prochaine bougie journalière / hebdomadaire, même modèle
         {data?.source ? ` (${data.source})` : ""}. En petit : réussite du backtest (part de directions correctes) sur l’historique
         disponible, avec sa marge d’erreur (vert : mieux que le hasard, rouge : moins bon). Touchez une ligne pour afficher
         l’instrument.
