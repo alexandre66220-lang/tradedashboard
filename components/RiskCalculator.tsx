@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { sizePosition } from "@/lib/risk";
 import type { AppliedLevels } from "./SlTpAdvisor";
+import type { TradeDraft } from "./TradesPanel";
 
 interface Props {
   epic: string;
@@ -12,6 +13,8 @@ interface Props {
   decimals: number;
   /** Levels sent by the SL/TP advisor */
   applied?: AppliedLevels | null;
+  /** Sends the sized position to the trade log form */
+  onLog?: (d: Omit<TradeDraft, "nonce" | "epic">) => void;
 }
 
 function load(key: string, fallback: string): string {
@@ -32,7 +35,7 @@ function save(key: string, value: string) {
 const num = (s: string) => Number(s.replace(",", "."));
 const money = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 
-export default function RiskCalculator({ epic, last, atr, direction, decimals, applied }: Props) {
+export default function RiskCalculator({ epic, last, atr, direction, decimals, applied, onLog }: Props) {
   const [capital, setCapital] = useState("1000");
   const [riskPct, setRiskPct] = useState("1");
   const [ratio, setRatio] = useState("2");
@@ -141,6 +144,16 @@ export default function RiskCalculator({ epic, last, atr, direction, decimals, a
               <dd>{res.leverage.toFixed(1)}×</dd>
             </div>
           </dl>
+          {onLog && last != null && (
+            <button
+              className="sl-apply"
+              onClick={() =>
+                onLog({ side, entry: last, size: res.units, stop: Number(res.stop.toFixed(decimals)), target: Number(res.takeProfit.toFixed(decimals)) })
+              }
+            >
+              Noter ce trade dans mon journal
+            </button>
+          )}
           {res.warnings.map((w) => (
             <p key={w} className="rc-warn">
               {w}

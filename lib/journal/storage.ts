@@ -2,11 +2,12 @@ import "server-only";
 import { BlobPreconditionFailedError, get, list, put } from "@vercel/blob";
 import type { JournalEntry } from "./types";
 
+/** JSON arrays in a key/value store with optimistic concurrency. Defaults to journal entries. */
 export interface JournalStorage {
-  read(key: string): Promise<{ entries: JournalEntry[]; etag: string | null }>;
+  read<T = JournalEntry>(key: string): Promise<{ entries: T[]; etag: string | null }>;
   /** Returns false when the blob changed since `etag` was read (caller retries). */
-  write(key: string, entries: JournalEntry[], etag: string | null): Promise<boolean>;
-  list(): Promise<string[]>;
+  write<T = JournalEntry>(key: string, entries: T[], etag: string | null): Promise<boolean>;
+  list(prefix?: string): Promise<string[]>;
 }
 
 export const PREFIX = "journal/";
@@ -24,8 +25,8 @@ export function memoryStorage(): JournalStorage {
       files.set(key, { data: JSON.stringify(entries), version: (f?.version ?? 0) + 1 });
       return true;
     },
-    async list() {
-      return [...files.keys()].sort();
+    async list(prefix = PREFIX) {
+      return [...files.keys()].filter((k) => k.startsWith(prefix)).sort();
     },
   };
 }
@@ -37,7 +38,7 @@ export function blobStorage(): JournalStorage {
       const res = await get(key, { access: "private", useCache: false });
       if (!res || res.statusCode !== 200) return { entries: [], etag: null };
       const text = await new Response(res.stream).text();
-      return { entries: JSON.parse(text) as JournalEntry[], etag: res.blob.etag };
+      return { entries: JSON.parse(text), etag: res.blob.etag };
     },
     async write(key, entries, etag) {
       try {
@@ -55,11 +56,11 @@ export function blobStorage(): JournalStorage {
         throw err;
       }
     },
-    async list() {
+    async list(prefix = PREFIX) {
       const keys: string[] = [];
       let cursor: string | undefined;
       do {
-        const page = await list({ prefix: PREFIX, cursor });
+        const page = await list({ prefix, cursor });
         keys.push(...page.blobs.map((b) => b.pathname));
         cursor = page.hasMore ? page.cursor : undefined;
       } while (cursor);

@@ -239,11 +239,23 @@ export function getCandles(epic: string, resolution: string, max = 1000, ttlMs =
   });
 }
 
-export function getMarketStatus(epic: string): Promise<MarketStatus> {
-  return cached(`status|${epic}`, STATUS_TTL_MS, async () => {
-    const data = await apiGet<{ snapshot?: { marketStatus?: string } }>(`/api/v1/markets/${encodeURIComponent(epic)}`);
-    return data.snapshot?.marketStatus ?? "UNKNOWN";
+export interface MarketQuote {
+  status: MarketStatus;
+  bid: number | null;
+  offer: number | null;
+}
+
+export function getMarketQuote(epic: string): Promise<MarketQuote> {
+  return cached(`quote|${epic}`, STATUS_TTL_MS, async () => {
+    const data = await apiGet<{ snapshot?: { marketStatus?: string; bid?: number; offer?: number } }>(`/api/v1/markets/${encodeURIComponent(epic)}`);
+    const snap = data.snapshot;
+    const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+    return { status: snap?.marketStatus ?? "UNKNOWN", bid: ok(snap?.bid) ? snap.bid : null, offer: ok(snap?.offer) ? snap.offer : null };
   });
+}
+
+export async function getMarketStatus(epic: string): Promise<MarketStatus> {
+  return (await getMarketQuote(epic)).status;
 }
 
 /** Test helper */

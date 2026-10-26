@@ -71,6 +71,21 @@ Le backtest rejoue le passé ; le journal juge les prévisions **en conditions r
 - **Affichage** : réussite avec marge d'erreur, comparaison aux stratégies naïves, verdict, et **gain simulé net** (une unité par prévision haussière ou baissière, après un spread supposé par instrument : `spreadBps` dans `config/instruments.ts`, sans frais de financement). Les statistiques sont séparées par modèle (ML / intégré). Aucun taux n'est affiché sous 20 prévisions jugées.
 - **Limites** : une entrée dont la bougie sort de l'historique chargé (1 000 bougies) avant d'avoir été jugée est marquée « expirée » et ignorée.
 
+### Mes trades (journal réel)
+
+Le dashboard ne passe aucun ordre : vous notez vos trades à la main, soit depuis le bouton « Noter ce trade dans mon journal » du calculateur de risque (taille, stop et objectif déjà remplis), soit via le formulaire « Noter un trade ». À l'enregistrement, la prévision affichée (sens, confiance, modèle) est conservée avec le trade. Clôturez ensuite en indiquant le prix de sortie.
+
+- **Stockage** : un fichier `trades/trades.json` dans le même stockage Blob privé que le journal des prévisions, mis à jour avec contrôle d'ETag ; 2 000 trades maximum. Routes : `GET/POST /api/trades`, `PATCH/DELETE /api/trades/[id]` (protégées par le mot de passe du site, validation stricte : le stop doit être du bon côté de l'entrée, etc.).
+- **Statistiques** : résultat total, réussite avec marge d'erreur (à partir de 20 trades clôturés), espérance en R (trades avec stop), pire creux, résultat du jour, courbe cumulée, part de trades avec stop, et comparaison « dans le sens du modèle » / « à contre-sens ».
+- **Perte maximale du jour** : montant à saisir dans le panneau (mémorisé sur l'appareil) ; une fois atteint, le feu passe au rouge.
+
+### Feu « pas de trade maintenant »
+
+Pastille sous le prix, toujours informative (rien n'est bloqué) :
+- **Rouge** : marché fermé, spread au moins 3 fois le spread habituel, perte maximale du jour atteinte.
+- **Orange** : spread élargi (≥ 1,8×), volatilité parmi les 10 % les plus fortes ou les plus faibles de l'historique chargé, données en retard, moitié de la perte du jour atteinte.
+- Le spread réel vient des prix d'achat / vente de la fiche du marché Capital.com (rafraîchis toutes les 30 s) ; il est comparé au `spreadBps` supposé dans `config/instruments.ts`, ce qui permet aussi de recaler cette valeur sur vos vrais spreads.
+
 ### Calculateur de risque
 
 Dans la colonne de droite : à partir du capital, du risque par trade (1 % par défaut) et d'un stop calculé sur l'**ATR** (amplitude moyenne des 14 dernières bougies, × 1,5 par défaut, ou distance manuelle), il donne la taille de position, le stop, l'objectif (rapport gain/risque réglable), la perte maximale, le gain visé et le levier effectif, avec des alertes au-delà de 2 % de risque ou 5× de levier. Les réglages sont mémorisés sur l'appareil. Montants en devise de cotation (USD), spread non inclus.

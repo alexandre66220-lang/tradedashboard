@@ -150,3 +150,34 @@ code { background: #1b1f2b; padding: 1px 4px; border-radius: 3px; font-size: 12p
 .sl-verdict.against { background: rgba(239,83,80,.1); color: var(--down); }
 .sl-apply { width: 100%; margin-top: 8px; background: var(--accent); border: 0; border-radius: 6px; padding: 10px; color: #fff; font-weight: 600; cursor: pointer; min-height: 40px; }
 .sl-table thead th:first-child { text-align: left; }
+
+.light { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.light summary { cursor: pointer; padding: 8px 10px; display: flex; align-items: center; gap: 8px; list-style: none; }
+.light summary::-webkit-details-marker { display: none; }
+.light .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.light.green .dot { background: var(--up); }
+.light.orange .dot { background: var(--warn); }
+.light.red .dot { background: var(--down); }
+.light.red { border-color: rgba(239,83,80,.5); }
+.light.orange { border-color: rgba(240,185,11,.4); }
+.light-body { padding: 0 10px 10px; font-size: 13px; }
+.light-body ul { margin: 4px 0 8px; padding-left: 18px; }
+.light-body li { margin: 4px 0; }
+.light-body li.red { color: var(--down); }
+.light-body li.orange { color: var(--warn); }
+.light-body p { margin: 6px 0; }
+.trade-stats { grid-template-columns: repeat(3, 1fr); row-gap: 10px; }
+@media (min-width: 900px) { .trade-stats { grid-template-columns: repeat(6, 1fr); } .trade-stats > div { display: block; } }
+.limit { margin: 10px 0; max-width: 360px; }
+.trade-form { margin-top: 8px; }
+.trade-form select { flex: 1; background: none; border: 0; color: var(--text); padding: 8px 0; font-size: 16px; min-width: 0; }
+.trade-form .seg { width: 100%; } .trade-form .seg button { flex: 1; }
+.sub { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 14px 0 4px; font-weight: 600; }
+.tlist { list-style: none; margin: 0; padding: 0; }
+.tlist li { border-top: 1px solid var(--border); padding: 8px 0; font-size: 13px; }
+.trow { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.tclose { display: flex; gap: 6px; margin-top: 6px; }
+.tclose input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; color: var(--text); }
+.tclose button { background: var(--accent); border: 0; border-radius: 6px; padding: 0 12px; color: #fff; cursor: pointer; min-height: 36px; }
+.tclose button.ghost { background: none; border: 1px solid var(--border); color: var(--muted); }
+button.mini { padding: 0 6px; margin-left: 8px; min-height: 0; font-size: 12px; }

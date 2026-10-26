@@ -1,12 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_RESOLUTION, DEFAULT_SPREAD_BPS, HORIZON_CHOICES, RESOLUTIONS, type Instrument, type ResolutionKey } from "@/config/instruments";
 import { averageTrueRange } from "@/lib/risk";
+import { tradeStats } from "@/lib/trades";
+import { trafficLight } from "@/lib/trafficlight";
+import { useTrades } from "@/lib/useTrades";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
+import TradesPanel, { type TradeDraft } from "./TradesPanel";
+import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
@@ -43,6 +48,14 @@ function readPref<T extends string>(key: string, fallback: T, allowed: readonly 
   }
 }
 
+function readRaw(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function writePref(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
@@ -60,9 +73,20 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [horizon, setHorizon] = useState(instrument.defaultHorizon);
   const [showBand, setShowBand] = useState(true);
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
+  const [draft, setDraft] = useState<TradeDraft | null>(null);
+  const [dailyLimit, setDailyLimitState] = useState<number | null>(null);
+  const tradeLog = useTrades();
+  useEffect(() => {
+    const v = Number(readRaw("lim:daily") || NaN);
+    if (Number.isFinite(v) && v > 0) setDailyLimitState(v);
+  }, []);
+  const setDailyLimit = (v: number | null) => {
+    setDailyLimitState(v);
+    writePref("lim:daily", v === null ? "" : String(v));
+  };
 
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [meta, setMeta] = useState<Pick<CandlesResponse, "marketStatus" | "env"> | null>(null);
+  const [meta, setMeta] = useState<Pick<CandlesResponse, "marketStatus" | "env" | "quote"> | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
@@ -90,7 +114,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         if (signal.aborted) return;
         if (c.status === "fulfilled") {
           setCandles(c.value.candles);
-          setMeta({ marketStatus: c.value.marketStatus, env: c.value.env });
+          setMeta({ marketStatus: c.value.marketStatus, env: c.value.env, quote: c.value.quote ?? null });
           setError(null);
           setUpdatedAt(new Date());
         } else {
@@ -147,6 +171,22 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   };
 
   const last = candles.at(-1);
+  const spreadAssumed = instrument.spreadBps ?? DEFAULT_SPREAD_BPS;
+  const todayPnl = tradeStats(tradeLog.trades, new Date().setHours(0, 0, 0, 0)).todayPnl;
+  const light = useMemo(
+    () =>
+      trafficLight({
+        marketStatus: meta?.marketStatus,
+        quote: meta?.quote,
+        assumedSpreadBps: spreadAssumed,
+        candles,
+        resMinutes: RESOLUTIONS[resolution].minutes,
+        todayPnl,
+        dailyLossLimit: dailyLimit,
+        now: Math.floor(Date.now() / 1000),
+      }),
+    [meta?.marketStatus, meta?.quote, spreadAssumed, candles, resolution, todayPnl, dailyLimit],
+  );
   const prev = candles.at(-2);
   const change = last && prev ? last.close - prev.close : null;
   const closed = meta && meta.marketStatus !== "TRADEABLE" && meta.marketStatus !== "UNKNOWN";
@@ -195,6 +235,8 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           {updatedAt && ` · maj ${updatedAt.toLocaleTimeString("fr-FR")}`}
         </span>
       </section>
+
+      {meta && candles.length > 0 && <TrafficLight result={light} assumedSpreadBps={spreadAssumed} />}
 
       <section className="controls">
         <div className="seg" role="group" aria-label="Unité de temps">
@@ -319,6 +361,10 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             direction={forecast?.direction}
             decimals={decimals}
             applied={applied}
+            onLog={(d) => {
+              setDraft({ ...d, epic, nonce: Date.now() });
+              setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth" }), 100);
+            }}
           />
           <OutlookPanel
             selected={epic}
@@ -329,6 +375,22 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           />
         </aside>
       </div>
+      <TradesPanel
+        trades={tradeLog.trades}
+        configured={tradeLog.configured}
+        error={tradeLog.error}
+        instruments={instruments}
+        selectedEpic={epic}
+        last={last?.close ?? null}
+        decimals={decimals}
+        model={forecast ? { direction: forecast.direction, confidence: forecast.confidence, source: forecast.source ?? "intégré" } : null}
+        draft={draft}
+        dailyLimit={dailyLimit}
+        onDailyLimit={setDailyLimit}
+        onAdd={tradeLog.add}
+        onPatch={tradeLog.patch}
+        onRemove={tradeLog.remove}
+      />
       <JournalPanel />
     </main>
   );

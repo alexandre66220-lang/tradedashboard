@@ -69,7 +69,7 @@ http.createServer((req, res) => {
   }
   if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/markets\/(.+)$/))) {
     stats.markets++;
-    return send(res, 200, { instrument: { epic: m[1], name: "Gold" }, snapshot: { marketStatus: process.env.MOCK_STATUS || "TRADEABLE", bid: 2650, offer: 2650.3 } });
+    return send(res, 200, { instrument: { epic: m[1], name: "Gold" }, snapshot: { marketStatus: process.env.MOCK_STATUS || "TRADEABLE", bid: 2650, offer: 2650 + Number(process.env.MOCK_SPREAD || 0.3) } });
   }
   stats.other++;
   send(res, 404, { errorCode: "error.not-found" });
