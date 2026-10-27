@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { OUTLOOKS } from "@/config/instruments";
-import type { ApiError, OutlookCell, OutlookResponse } from "@/lib/types";
+import { OUTLOOK_PENDING, type ApiError, type OutlookCell, type OutlookResponse } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
 import { fmtHit } from "./BacktestDetails";
 import { readJson, RETRY_AFTER_FAILURE_MS, unexpectedResponse } from "@/lib/readJson";
 import Disclaimer from "./Disclaimer";
 
 const POLL_MS = 5 * 60_000;
+const PENDING_RETRY_MS = 15_000; // some forecasts were still being computed
 const ARROW = { up: "▲", down: "▼", flat: "▶" } as const;
 
 const pct = (v: number, signed = false) =>
@@ -18,6 +19,7 @@ const price = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 
 
 function Cell({ cell }: { cell: OutlookCell | { error: string } | undefined }) {
   if (!cell) return <td className="muted">…</td>;
+  if ("error" in cell && cell.error === OUTLOOK_PENDING) return <td className="muted small">calcul…</td>;
   if ("error" in cell || !Number.isFinite(cell.change)) {
     return (
       <td className="muted small" title={"error" in cell ? cell.error : undefined}>
@@ -49,6 +51,7 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let failed = false;
+    let pending = false;
     const run = async () => {
       clearTimeout(timer);
       if (!document.hidden) {
@@ -64,13 +67,14 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
           setData(body);
           setError(null);
           failed = false;
+          pending = Boolean(body.pending);
         } catch (e) {
           if (ctrl.signal.aborted) return;
           failed = true;
           setError((e as Error).message || "Serveur injoignable.");
         }
       }
-      if (!ctrl.signal.aborted) timer = setTimeout(run, failed ? RETRY_AFTER_FAILURE_MS : POLL_MS);
+      if (!ctrl.signal.aborted) timer = setTimeout(run, failed ? RETRY_AFTER_FAILURE_MS : pending ? PENDING_RETRY_MS : POLL_MS);
     };
     const onVisible = () => !document.hidden && run();
     run();

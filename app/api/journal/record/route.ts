@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { INSTRUMENTS, OUTLOOKS } from "@/config/instruments";
+import { INSTRUMENTS } from "@/config/instruments";
 import { timingSafeEqualStr } from "@/lib/auth";
 import { getCandles } from "@/lib/capital";
 import { runForecast } from "@/lib/forecast";
 import { handleError, jsonError } from "@/lib/http";
+import { buildOutlook } from "@/lib/outlook";
 import { recordSafe } from "@/lib/journal/service";
 import { getStorage } from "@/lib/journal/storage";
 
@@ -26,11 +27,9 @@ export async function GET(req: Request) {
   // they cannot change faster, and each one costs a model run); no scope: everything.
   const scope = new URL(req.url).searchParams.get("scope");
   try {
-    // Per instrument: the default intraday forecast, plus the daily and weekly outlooks
-    const jobs = INSTRUMENTS.flatMap((inst) => [
-      ...(scope === "daily" ? [] : [{ epic: inst.epic, resolution: "MINUTE_5", resMinutes: 5, horizon: inst.defaultHorizon }]),
-      ...(scope === "intraday" ? [] : OUTLOOKS.map((o) => ({ epic: inst.epic, resolution: o.api, resMinutes: o.minutes, horizon: o.minutes }))),
-    ]);
+    // Per instrument: the default intraday forecast. The daily and weekly outlooks are computed (and recorded) by buildOutlook.
+    const jobs = scope === "daily" ? [] : INSTRUMENTS.map((inst) => ({ epic: inst.epic, resolution: "MINUTE_5", resMinutes: 5, horizon: inst.defaultHorizon }));
+    const outlook = scope === "intraday" ? null : buildOutlook(45_000);
     const results = await Promise.allSettled(
       jobs.map(async (series) => {
         const candles = await getCandles(series.epic, series.resolution, 1000, 60_000);
@@ -44,8 +43,9 @@ export async function GET(req: Request) {
         await recordSafe(series, candles, forecast);
       }),
     );
+    const done = outlook ? await outlook : null;
     return NextResponse.json(
-      { jobs: jobs.length, failed: results.filter((r) => r.status === "rejected").length },
+      { jobs: jobs.length, failed: results.filter((r) => r.status === "rejected").length, ...(done ? { outlookPending: Boolean(done.pending) } : {}) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {

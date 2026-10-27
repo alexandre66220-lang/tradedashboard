@@ -1,85 +1,25 @@
 import { NextResponse } from "next/server";
-import { INSTRUMENTS, OUTLOOKS } from "@/config/instruments";
-import { CapitalError, getCandles } from "@/lib/capital";
-import { runForecast } from "@/lib/forecast";
 import { handleError } from "@/lib/http";
-import { recordSafe } from "@/lib/journal/service";
-import type { OutlookCell, OutlookItem, OutlookResponse } from "@/lib/types";
+import { buildOutlook } from "@/lib/outlook";
+import type { OutlookResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 // An external ML model may need a few seconds (cold start + training).
 export const maxDuration = 60;
 
-// Daily/weekly candles move slowly: refresh them every 5 min, the whole outlook every minute.
-const CANDLES_TTL_MS = 5 * 60_000;
+// A complete outlook is kept a minute in memory; each forecast is also kept half an hour in the shared store (lib/outlook.ts).
 const OUTLOOK_TTL_MS = 60_000;
 
-let cache: { at: number; value: Promise<OutlookResponse> } | null = null;
-
-function message(err: unknown): string {
-  return err instanceof CapitalError ? err.message : "Prévision indisponible.";
-}
-
-async function buildOutlook(): Promise<OutlookResponse> {
-  let source: string | undefined;
-  const items = await Promise.all(
-    INSTRUMENTS.map(async (inst): Promise<OutlookItem> => {
-      const item: OutlookItem = { epic: inst.epic, name: inst.name, last: null, horizons: {} };
-      await Promise.all(
-        OUTLOOKS.map(async (o) => {
-          try {
-            const candles = await getCandles(inst.epic, o.api, 1000, CANDLES_TTL_MS);
-            const last = candles.at(-1);
-            if (!last) throw new CapitalError("NO_DATA", "Pas d'historique disponible.");
-            if (o.key === "day") item.last = last.close;
-            const f = await runForecast({
-              epic: inst.epic,
-              resolution: o.api,
-              resolutionMinutes: o.minutes,
-              horizon: o.minutes,
-              candles,
-            });
-            const end = f.points.at(-1);
-            if (!end || ![end.value, end.low, end.high, f.confidence].every(Number.isFinite)) {
-              throw new CapitalError("NO_DATA", "Historique insuffisant pour cette prévision.");
-            }
-            source ??= f.source;
-            await recordSafe({ epic: inst.epic, resolution: o.api, resMinutes: o.minutes, horizon: o.minutes }, candles, f);
-            const cell: OutlookCell = {
-              change: end.value / last.close - 1,
-              target: end.value,
-              low: end.low,
-              high: end.high,
-              direction: f.direction,
-              confidence: f.confidence,
-              backtestHitRate: f.backtestHitRate,
-              backtestSamples: f.backtestSamples,
-              backtest: f.backtest,
-            };
-            item.horizons[o.key] = cell;
-          } catch (err) {
-            item.horizons[o.key] = { error: message(err) };
-          }
-        }),
-      );
-      return item;
-    }),
-  );
-  return { items, source, generatedAt: Date.now() };
-}
+let cache: { at: number; value: OutlookResponse } | null = null;
 
 export async function GET() {
   try {
-    let entry = cache;
-    if (!entry || Date.now() - entry.at > OUTLOOK_TTL_MS) {
-      const fresh = { at: Date.now(), value: buildOutlook() };
-      entry = cache = fresh;
-      // Keep partial failures out of the cache so the next poll retries them.
-      fresh.value
-        .then((r) => r.items.some((i) => Object.values(i.horizons).some((h) => "error" in h)) && cache === fresh && (cache = null))
-        .catch(() => cache === fresh && (cache = null));
-    }
-    return NextResponse.json(await entry.value, { headers: { "Cache-Control": "no-store" } });
+    if (cache && Date.now() - cache.at < OUTLOOK_TTL_MS) return NextResponse.json(cache.value, { headers: { "Cache-Control": "no-store" } });
+    const value = await buildOutlook();
+    // Keep partial results out of the cache so that the next poll fills in the missing ones.
+    const complete = !value.pending && value.items.every((i) => Object.values(i.horizons).every((h) => !("error" in h)));
+    if (complete) cache = { at: Date.now(), value };
+    return NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return handleError(err);
   }
