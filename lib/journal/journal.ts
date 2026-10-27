@@ -1,6 +1,6 @@
 import type { Candle, ForecastResponse } from "../types";
 import type { JournalStorage } from "./storage";
-import type { JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
+import type { CrowdFadeGroup, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
 
 const MAX_ENTRIES_PER_SERIES = 1500;
 const MIN_SAMPLES = 20;
@@ -204,4 +204,33 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     curve,
     firstRecordedAt: first,
   };
+}
+
+/** Share of clients long from which the crowd counts as "extreme" (on either side). */
+export const CROWD_EXTREME = 70;
+
+/**
+ * Hit rate and net return of systematically trading against the majority of clients, by how lopsided
+ * the crowd was. Independent of the forecast model: abstentions ("flat") count too.
+ */
+export function computeCrowdFade(entries: JournalEntry[], spreadBps: (epic: string) => number): CrowdFadeStats {
+  const acc = { extreme: { hits: 0, n: 0, gross: 0, net: 0 }, moderate: { hits: 0, n: 0, gross: 0, net: 0 } };
+  let judged = 0;
+  for (const e of entries) {
+    if (e.expired || e.sentiment === undefined || e.outcome === undefined || e.ref === undefined) continue;
+    judged++;
+    const move = e.outcome - e.ref;
+    if (move === 0) continue;
+    const long = e.sentiment;
+    const side = long >= 60 ? 1 : long <= 40 ? -1 : 0; // the crowd's side; 0 = split
+    if (side === 0) continue;
+    const g = long >= CROWD_EXTREME || long <= 100 - CROWD_EXTREME ? acc.extreme : acc.moderate;
+    const r = -side * (e.outcome / e.ref - 1);
+    g.n++;
+    g.hits += (move > 0) === (side < 0) ? 1 : 0;
+    g.gross += r;
+    g.net += r - spreadBps(e.epic) / 1e4;
+  }
+  const group = (g: typeof acc.extreme): CrowdFadeGroup => ({ fade: hit(g.hits, g.n), grossReturnPct: g.gross * 100, netReturnPct: g.net * 100 });
+  return { judged, extreme: group(acc.extreme), moderate: group(acc.moderate) };
 }

@@ -60,3 +60,24 @@ export interface JournalStats {
   curve: Array<{ t: number; v: number }>;
   firstRecordedAt: number | null;
 }
+
+export interface CrowdFadeGroup {
+  /** Calls "against the crowd": a hit is a move opposite to the side holding the majority of clients */
+  fade: JournalHit;
+  /** Net simulated return in % of fading the crowd, one unit per window, after the assumed spread */
+  netReturnPct: number;
+  grossReturnPct: number;
+}
+
+/**
+ * Model-independent test of "go against the crowd": every resolved window with a recorded client
+ * sentiment counts, whatever the forecast said.
+ */
+export interface CrowdFadeStats {
+  /** Resolved windows that have a recorded sentiment */
+  judged: number;
+  /** >= 70 % or <= 30 % of clients on one side */
+  extreme: CrowdFadeGroup;
+  /** 60-70 % or 30-40 % on one side */
+  moderate: CrowdFadeGroup;
+}

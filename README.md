@@ -104,6 +104,8 @@ Panneau « Sentiment des clients » : part des clients de Capital.com acheteurs 
 
 Ce sentiment **n'est pas une entrée du modèle** : l'API ne donne que la valeur du moment, sans historique, donc impossible de l'apprendre sur le passé. À la place, il est enregistré avec chaque prévision du journal, qui compare ensuite la réussite quand la prévision va dans le sens de la foule (≥ 60 % d'un côté), à contre-courant, ou quand la foule est partagée. Si un écart net apparaît au bout de plusieurs semaines, il pourra devenir une variable du modèle.
 
+Le journal contient aussi un bloc **« Aller contre la foule ? »**, indépendant du modèle : à chaque fenêtre jugée qui a un sentiment enregistré, on simule un pari à l'inverse de la majorité des clients, séparément quand la foule est très d'un côté (≥ 70 % / ≤ 30 %) et plutôt d'un côté (60–70 % / 30–40 %), avec taux de réussite, marge d'erreur, gain net après spread et verdict (« signal contrarien » seulement si le taux dépasse 50 % au-delà de la marge **et** que le gain net est positif). Les fenêtres voisines se ressemblent, la marge est donc plutôt optimiste.
+
 ### Alertes sur téléphone
 
 Notifications push gratuites via [ntfy](https://ntfy.sh) (aucun compte : l'application s'abonne à un « sujet » secret). Trois types d'alertes :

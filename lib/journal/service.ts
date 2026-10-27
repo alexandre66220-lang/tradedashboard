@@ -2,9 +2,9 @@ import "server-only";
 import { INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
 import { getCandles, getSentimentFor } from "@/lib/capital";
 import type { Candle, ForecastResponse } from "@/lib/types";
-import { computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
+import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
-import type { JournalEntry, JournalStats, ModelFamily } from "./types";
+import type { CrowdFadeStats, JournalEntry, JournalStats, ModelFamily } from "./types";
 
 export const RESOLUTION_LABELS: Record<string, string> = {
   MINUTE: "1 min",
@@ -30,12 +30,14 @@ export interface JournalOverview {
   configured: boolean;
   generatedAt: number;
   models: Partial<Record<ModelFamily, JournalStats>>;
+  /** "Go against the crowd" test, over every recorded window */
+  crowd: CrowdFadeStats | null;
   series: Array<{ epic: string; name: string; resolution: string; label: string; horizon: number; model: ModelFamily; stats: JournalStats }>;
 }
 
 export async function journalOverview(): Promise<JournalOverview> {
   const storage = getStorage();
-  if (!storage) return { configured: false, generatedAt: Date.now(), models: {}, series: [] };
+  if (!storage) return { configured: false, generatedAt: Date.now(), models: {}, crowd: null, series: [] };
 
   const keys = await storage.list();
   const all: JournalEntry[] = [];
@@ -79,5 +81,5 @@ export async function journalOverview(): Promise<JournalOverview> {
     if (part.length) models[family] = computeStats(part, spreadBpsFor);
   }
   series.sort((a, b) => a.epic.localeCompare(b.epic) || a.horizon - b.horizon || a.model.localeCompare(b.model));
-  return { configured: true, generatedAt: Date.now(), models, series };
+  return { configured: true, generatedAt: Date.now(), models, crowd: computeCrowdFade(all, spreadBpsFor), series };
 }
