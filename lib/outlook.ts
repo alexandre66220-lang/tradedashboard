@@ -117,3 +117,46 @@ export async function buildOutlook(budgetMs = BUDGET_MS): Promise<OutlookRespons
   clearTimeout(timer);
   return { items, source, generatedAt: Date.now(), ...(pending ? { pending: true } : {}) };
 }
+
+// ---- one forecast at a time -----------------------------------------------------------------------------------
+// A serverless host stops a function as soon as its response is sent, so work left running "in the background" never
+// finishes. The browser therefore asks for each missing forecast in its own request (which waits for the result), and
+// the overview only reads what is already stored.
+
+export function findOutlook(epic: string, key: string): { inst: Instrument; o: Outlook } | null {
+  const inst = INSTRUMENTS.find((i) => i.epic === epic);
+  const o = OUTLOOKS.find((x) => x.key === key);
+  return inst && o ? { inst, o } : null;
+}
+
+/** The forecast of one instrument and one outlook: from the store when fresh, else computed (and stored). */
+export function computeCell(inst: Instrument, o: Outlook): Promise<Stored> {
+  return ensure(inst, o);
+}
+
+/** The outlook from what is stored, without computing anything: cells that are missing or expired are pending. */
+export async function readStored(): Promise<OutlookResponse> {
+  const now = Date.now();
+  let source: string | undefined;
+  let pending = false;
+  const items = await Promise.all(
+    INSTRUMENTS.map(async (inst): Promise<OutlookItem> => {
+      const item: OutlookItem = { epic: inst.epic, name: inst.name, last: null, horizons: {} };
+      await Promise.all(
+        OUTLOOKS.map(async (o) => {
+          const got = await readFresh(inst, o, now);
+          if (!got) {
+            pending = true;
+            item.horizons[o.key] = { error: OUTLOOK_PENDING };
+            return;
+          }
+          source ??= got.source;
+          if (o.key === "day") item.last = got.last;
+          item.horizons[o.key] = got.cell;
+        }),
+      );
+      return item;
+    }),
+  );
+  return { items, source, generatedAt: now, ...(pending ? { pending: true } : {}) };
+}
