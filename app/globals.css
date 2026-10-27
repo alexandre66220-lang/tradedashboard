@@ -246,7 +246,8 @@ button.mini { min-height: 32px; padding: 4px 10px; }
   .dot-badge { position: static; border: 0; }
   .tabpanels { display: contents; }
   .tabpanel { grid-area: panels; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; }
-  .tp-forecast { grid-area: forecast; grid-template-columns: 1fr; }
+  /* the side column is as tall as the chart and scrolls inside, so no empty band is left under the chart */
+  .tp-forecast { grid-area: forecast; grid-template-columns: 1fr; height: 72vh; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; scrollbar-width: thin; }
   .tabpanel[hidden] { display: none; }
 }
 

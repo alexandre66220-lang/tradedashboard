@@ -4,7 +4,7 @@ import { lastBackup } from "@/lib/backup";
 import { CapitalError, capitalEnv, getMarketQuote } from "@/lib/capital";
 import { getCalendar } from "@/lib/calendar-source";
 import { journalOverview } from "@/lib/journal/service";
-import { getStorage } from "@/lib/journal/storage";
+import { backend, getStorage, netlifyDiagnostics } from "@/lib/journal/storage";
 import { notifyConfigured } from "@/lib/notify";
 import { readList } from "@/lib/store";
 
@@ -78,9 +78,18 @@ const checkModel = () =>
 const checkStorage = () =>
   guard("storage", "Stockage (journal, trades, alertes)", async () => {
     if (!getStorage()) return { status: "error", detail: "Aucun stockage configuré : le journal, les trades et les alertes ne sont pas enregistrés." };
+    if (backend() === "netlify") {
+      // Says why Netlify Blobs fails instead of just timing out
+      const d = await netlifyDiagnostics();
+      const detail = `Contexte : ${d.context}. Lecture rapide : ${d.eventual}. Lecture stricte : ${d.strong}.`;
+      if (!d.eventualOk && !d.strongOk) return { status: "error", detail: `Netlify Blobs ne répond pas. ${detail}` };
+      if (!d.strongOk) return { status: "warn", detail: `La lecture stricte échoue. ${detail}` };
+      await readList("health/ping");
+      return { status: "ok", detail: `Lecture possible (Netlify Blobs). ${detail}` };
+    }
     await readList("health/ping");
-    const which = process.env.STORAGE_BACKEND || (process.env.NETLIFY_BLOBS_CONTEXT ? "netlify" : process.env.BLOB_READ_WRITE_TOKEN ? "vercel" : "mémoire");
-    return { status: "ok", detail: `Lecture possible (${which === "netlify" ? "Netlify Blobs" : which === "vercel" ? "Vercel Blob" : "mémoire locale, non durable"}).` };
+    const which = process.env.BLOB_READ_WRITE_TOKEN ? "vercel" : "mémoire";
+    return { status: "ok", detail: `Lecture possible (${which === "vercel" ? "Vercel Blob" : "mémoire locale, non durable"}).` };
   });
 
 const checkJournal = () =>
