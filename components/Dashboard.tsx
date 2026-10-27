@@ -11,6 +11,9 @@ import { useAlerts } from "@/lib/useAlerts";
 import { useCalendar } from "@/lib/useCalendar";
 import { useTrades } from "@/lib/useTrades";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
+import HealthPanel from "./HealthPanel";
+import SignalBadge from "./SignalBadge";
+import { useSignal } from "@/lib/useSignal";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
 import TradesPanel, { type TradeDraft } from "./TradesPanel";
@@ -212,6 +215,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     setHorizon(h || next.defaultHorizon);
   };
 
+  const signal = useSignal(epic, resolution, horizon, forecast?.source);
   const last = candles.at(-1);
   const spreadAssumed = instrument.spreadBps ?? DEFAULT_SPREAD_BPS;
   const todayPnl = tradeStats(tradeLog.trades, new Date().setHours(0, 0, 0, 0)).todayPnl;
@@ -361,9 +365,10 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           </div>
           {forecast ? (
             <>
-              <div className={`dir ${forecast.direction}`}>
+              <div className={`dir ${forecast.direction}${signal && signal.level !== "validated" ? " unproven" : ""}`}>
                 {dirArrow[forecast.direction]} {dirLabel[forecast.direction]}
               </div>
+              {signal && <SignalBadge status={signal} />}
               <dl className="stats">
                 <div>
                   <dt>Cible</dt>
@@ -388,6 +393,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
                     bt={forecast.backtest}
                     confidence={forecast.confidence}
                     features={forecast.features}
+                    scan={forecast.source?.startsWith("ML") ? { epic, resolution } : undefined}
                     compareQuery={forecast.source?.startsWith("ML") ? `epic=${encodeURIComponent(epic)}&resolution=${resolution}&horizon=${horizon}` : undefined}
                   />
                 </>
@@ -456,6 +462,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
       <JournalPanel />
           </div>
           <div role="tabpanel" id="panel-alerts" aria-labelledby="tab-alerts" className="tabpanel" hidden={activeTab !== "alerts"}>
+          <HealthPanel />
           <CalendarPanel events={calendar.events} stale={calendar.stale} error={calendar.error} profile={instrument} name={instrument.name} />
       <AlertsPanel
         alerts={priceAlerts.alerts}

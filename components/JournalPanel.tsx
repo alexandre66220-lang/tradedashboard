@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { JournalOverview } from "@/lib/journal/service";
-import { MODEL_FAMILIES, type CrowdFadeGroup, type CrowdFadeStats, type JournalHit, type JournalStats, type ModelFamily } from "@/lib/journal/types";
+import { MODEL_FAMILIES, SESSIONS, type CrowdFadeGroup, type CrowdFadeStats, type JournalHit, type JournalStats, type ModelFamily } from "@/lib/journal/types";
 import { verdict } from "@/lib/verdict";
 import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
@@ -58,6 +58,18 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
         <p className="muted small">
           Selon le sentiment des clients : prévision dans le sens de la foule {fmtHit(st.bySentiment.with)} · à contre-courant{" "}
           {fmtHit(st.bySentiment.against)} · foule partagée {fmtHit(st.bySentiment.neutral)}.
+        </p>
+      )}
+      {SESSIONS.some((x) => st.bySession[x.key].hit.samples > 0) && (
+        <p className="muted small">
+          Selon le moment de la journée (heures UTC, Paris = UTC+1 ou +2) :{" "}
+          {SESSIONS.filter((x) => st.bySession[x.key].hit.samples > 0)
+            .map((x) => {
+              const g = st.bySession[x.key];
+              return `${x.label} ${x.from}–${x.to} h : ${fmtHit(g.hit)}${g.hit.hitRate != null ? ` (${fmtPct(g.netReturnPct)} net)` : ""}`;
+            })
+            .join(" · ")}
+          .
         </p>
       )}
       {st.byNews.near.samples + st.byNews.calm.samples > 0 && (
