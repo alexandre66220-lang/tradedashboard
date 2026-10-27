@@ -100,25 +100,37 @@ export function blobStorage(): JournalStorage {
  * Netlify Blobs: one site-wide store, JSON values, conditional writes with `onlyIfMatch` / `onlyIfNew`.
  * Strong consistency, so that a read after a write sees it (and the ETag is the current one).
  */
+// A Netlify Blobs call that never answers would hold the whole request until the platform cuts it (30 s); fail sooner instead.
+const NETLIFY_TIMEOUT_MS = 10_000;
+function within<T>(p: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Netlify Blobs did not answer in time")), NETLIFY_TIMEOUT_MS);
+    p.then(
+      (v) => (clearTimeout(timer), resolve(v)),
+      (e) => (clearTimeout(timer), reject(e)),
+    );
+  });
+}
+
 export function netlifyStorage(): JournalStorage {
   const store = () => getStore({ name: process.env.NETLIFY_BLOBS_STORE || "tradedashboard", consistency: "strong" });
   return {
     async read<T>(key: string) {
-      const found = await store().getWithMetadata(key, { type: "json", consistency: "strong" });
+      const found = await within(store().getWithMetadata(key, { type: "json", consistency: "strong" }));
       if (!found) return { entries: [] as T[], etag: null };
       return { entries: (Array.isArray(found.data) ? found.data : []) as T[], etag: found.etag ?? null };
     },
     async write<T>(key: string, entries: T[], etag: string | null, force = false) {
       const s = store();
       if (force) {
-        await s.setJSON(key, entries);
+        await within(s.setJSON(key, entries));
         return true;
       }
-      const res = etag ? await s.setJSON(key, entries, { onlyIfMatch: etag }) : await s.setJSON(key, entries, { onlyIfNew: true });
+      const res = await within(etag ? s.setJSON(key, entries, { onlyIfMatch: etag }) : s.setJSON(key, entries, { onlyIfNew: true }));
       return res.modified;
     },
     async list(prefix = PREFIX) {
-      const { blobs } = await store().list({ prefix });
+      const { blobs } = await within(store().list({ prefix }));
       return blobs.map((b) => b.key).sort();
     },
     async remove(key) {
