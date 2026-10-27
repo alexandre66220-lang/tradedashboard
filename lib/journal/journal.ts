@@ -58,9 +58,13 @@ export function resolveEntries(entries: JournalEntry[], candles: Candle[]): { en
 
 const seen = new Map<string, number>();
 const SEEN_TTL_MS = 6 * 3600_000;
+// A window whose recording failed is not retried on every poll (every few seconds), only once in a while
+const failed = new Map<string, number>();
+const FAILED_COOLDOWN_MS = 60_000;
 
 export function __resetJournalCache() {
   seen.clear();
+  failed.clear();
 }
 
 async function updateSeries(storage: JournalStorage, key: string, fn: (entries: JournalEntry[]) => JournalEntry[] | null): Promise<boolean> {
@@ -70,7 +74,14 @@ async function updateSeries(storage: JournalStorage, key: string, fn: (entries: 
     if (next === null) return false;
     if (await storage.write(key, next.slice(-MAX_ENTRIES_PER_SERIES), etag)) return true;
   }
-  throw new Error("journal write kept conflicting");
+  // Still conflicting. Entries are recorded and resolved idempotently (one per window, outcomes from candles), so a
+  // lost update repairs itself on the next poll: better than a journal that never fills.
+  const { entries } = await storage.read(key);
+  const next = fn(entries);
+  if (next === null) return false;
+  console.warn("[journal] conflicting writes: overwriting");
+  await storage.write(key, next.slice(-MAX_ENTRIES_PER_SERIES), null, true);
+  return true;
 }
 
 /**
@@ -96,6 +107,7 @@ export async function recordForecast(
 
   for (const [k, at] of seen) if (now - at > SEEN_TTL_MS) seen.delete(k);
   if (seen.has(id)) return false;
+  if (now - (failed.get(id) ?? -Infinity) < FAILED_COOLDOWN_MS) return false;
 
   const entry: JournalEntry = {
     id,
@@ -114,11 +126,17 @@ export async function recordForecast(
     ...(typeof sentimentLong === "number" && Number.isFinite(sentimentLong) ? { sentiment: Math.round(sentimentLong * 10) / 10 } : {}),
     ...(typeof news === "boolean" ? { news } : {}),
   };
-  const wrote = await updateSeries(storage, seriesKey(series), (entries) => {
-    const { entries: resolved, changed } = resolveEntries(entries, candles);
-    if (resolved.some((e) => e.id === id)) return changed ? resolved : null;
-    return [...resolved, entry];
-  });
+  let wrote: boolean;
+  try {
+    wrote = await updateSeries(storage, seriesKey(series), (entries) => {
+      const { entries: resolved, changed } = resolveEntries(entries, candles);
+      if (resolved.some((e) => e.id === id)) return changed ? resolved : null;
+      return [...resolved, entry];
+    });
+  } catch (err) {
+    failed.set(id, now);
+    throw err;
+  }
   seen.set(id, now);
   return wrote;
 }
