@@ -20,8 +20,11 @@ export default async (req: Request, context: { site?: { url?: string } }) => {
     console.warn("[journal-record] refused: bad credentials");
     return;
   }
+  // "intraday" (every 30 min) or "daily" (daily and weekly outlooks, once a day); anything else records everything
+  const asked = new URL(req.url).searchParams.get("scope");
+  const scope = asked === "intraday" || asked === "daily" ? `?scope=${asked}` : "";
   try {
-    const res = await fetch(`${site}/api/journal/record`, {
+    const res = await fetch(`${site}/api/journal/record${scope}`, {
       headers: { Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(58_000),
     });

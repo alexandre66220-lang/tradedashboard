@@ -7,7 +7,7 @@ import { verdict } from "@/lib/verdict";
 import { fmtHit } from "./BacktestDetails";
 import Disclaimer from "./Disclaimer";
 
-const POLL_MS = 60_000;
+const POLL_MS = 5 * 60_000;
 const ARROW = { up: "▲", down: "▼", flat: "▶" } as const;
 
 const pct = (v: number, signed = false) =>

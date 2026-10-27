@@ -35,7 +35,7 @@ export function useAlerts() {
 
   useEffect(() => {
     reload();
-    const t = setInterval(() => !document.hidden && reload(), 60_000);
+    const t = setInterval(() => !document.hidden && reload(), 5 * 60_000);
     return () => clearInterval(t);
   }, [reload]);
 

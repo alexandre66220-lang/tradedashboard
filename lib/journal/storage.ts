@@ -1,4 +1,5 @@
 import "server-only";
+import { getStore } from "@netlify/blobs";
 import { BlobNotFoundError, BlobPreconditionFailedError, get, head, list, put } from "@vercel/blob";
 import type { JournalEntry } from "./types";
 
@@ -83,12 +84,59 @@ export function blobStorage(): JournalStorage {
   };
 }
 
+/**
+ * Netlify Blobs: one site-wide store, JSON values, conditional writes with `onlyIfMatch` / `onlyIfNew`.
+ * Strong consistency, so that a read after a write sees it (and the ETag is the current one).
+ */
+export function netlifyStorage(): JournalStorage {
+  const store = () => getStore({ name: process.env.NETLIFY_BLOBS_STORE || "tradedashboard", consistency: "strong" });
+  return {
+    async read<T>(key: string) {
+      const found = await store().getWithMetadata(key, { type: "json", consistency: "strong" });
+      if (!found) return { entries: [] as T[], etag: null };
+      return { entries: (Array.isArray(found.data) ? found.data : []) as T[], etag: found.etag ?? null };
+    },
+    async write<T>(key: string, entries: T[], etag: string | null, force = false) {
+      const s = store();
+      if (force) {
+        await s.setJSON(key, entries);
+        return true;
+      }
+      const res = etag ? await s.setJSON(key, entries, { onlyIfMatch: etag }) : await s.setJSON(key, entries, { onlyIfNew: true });
+      return res.modified;
+    },
+    async list(prefix = PREFIX) {
+      const { blobs } = await store().list({ prefix });
+      return blobs.map((b) => b.key).sort();
+    },
+  };
+}
+
+type Backend = "netlify" | "vercel" | "memory";
+
+/** Which store to use: STORAGE_BACKEND if set, else Netlify when running there, else Vercel Blob when a token exists. */
+function backend(): Backend | null {
+  const forced = process.env.STORAGE_BACKEND;
+  if (forced === "netlify" || forced === "vercel" || forced === "memory") return forced;
+  if (process.env.NETLIFY_BLOBS_CONTEXT || (globalThis as { netlifyBlobsContext?: unknown }).netlifyBlobsContext) return "netlify";
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "vercel";
+  // Local development only: non-persistent, handy to try the feature without a store
+  if (process.env.JOURNAL_STORAGE === "memory") return "memory";
+  return null;
+}
+
 let memory: JournalStorage | null = null;
 
-/** null when the journal is not configured (no Blob store connected). */
+/** null when the journal is not configured (no store available). */
 export function getStorage(): JournalStorage | null {
-  if (process.env.BLOB_READ_WRITE_TOKEN) return blobStorage();
-  // Local development only: non-persistent, handy to try the feature without a Blob store
-  if (process.env.JOURNAL_STORAGE === "memory") return (memory ??= memoryStorage());
-  return null;
+  switch (backend()) {
+    case "netlify":
+      return netlifyStorage();
+    case "vercel":
+      return process.env.BLOB_READ_WRITE_TOKEN ? blobStorage() : null;
+    case "memory":
+      return (memory ??= memoryStorage());
+    default:
+      return null;
+  }
 }
