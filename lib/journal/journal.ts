@@ -1,6 +1,6 @@
 import type { Candle, ForecastResponse } from "../types";
 import type { JournalStorage } from "./storage";
-import type { CrowdFadeGroup, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
+import { SESSIONS, type CrowdFadeGroup, type SessionKey, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
 
 const MAX_ENTRIES_PER_SERIES = 1500;
 const MIN_SAMPLES = 20;
@@ -177,6 +177,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
   let gross = 0, net = 0;
   const crowd: Record<CrowdRelation, { hits: number; n: number }> = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
   const byNews = { near: { hits: 0, n: 0 }, calm: { hits: 0, n: 0 } };
+  const bySession = Object.fromEntries(SESSIONS.map((x) => [x.key, { hits: 0, n: 0, net: 0 }])) as Record<SessionKey, { hits: number; n: number; net: number }>;
   const curve: JournalStats["curve"] = [];
   let first: number | null = null;
 
@@ -210,6 +211,16 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
       g.n++;
       g.hits += (e.direction === "up") === up ? 1 : 0;
     }
+    if (e.resMinutes < 1440) {
+      const hour = new Date(e.t * 1000).getUTCHours();
+      const part = SESSIONS.find((x) => hour >= x.from && hour < x.to);
+      if (part) {
+        const g = bySession[part.key];
+        g.n++;
+        g.hits += (e.direction === "up") === up ? 1 : 0;
+        g.net += sign * (e.outcome / e.ref - 1) - spreadBps(e.epic) / 1e4;
+      }
+    }
     upHits += up ? 1 : 0;
     lastHits += e.ref - e.prev >= 0 === up ? 1 : 0;
     const r = sign * (e.outcome / e.ref - 1);
@@ -226,6 +237,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     model: hit(hits, evaluated),
     baselines: { alwaysUp: hit(upHits, evaluated), lastMove: hit(lastHits, evaluated) },
     bySentiment: { with: hit(crowd.with.hits, crowd.with.n), against: hit(crowd.against.hits, crowd.against.n), neutral: hit(crowd.neutral.hits, crowd.neutral.n) },
+    bySession: Object.fromEntries(SESSIONS.map((x) => [x.key, { hit: hit(bySession[x.key].hits, bySession[x.key].n), netReturnPct: bySession[x.key].net * 100 }])) as JournalStats["bySession"],
     byNews: { near: hit(byNews.near.hits, byNews.near.n), calm: hit(byNews.calm.hits, byNews.calm.n) },
     netReturnPct: net * 100,
     grossReturnPct: gross * 100,

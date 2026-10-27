@@ -1,5 +1,6 @@
 import type { BacktestStats, HitStat } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
+import HorizonScan from "./HorizonScan";
 import ModelCompare from "./ModelCompare";
 
 export const fmtHit = (s: Pick<HitStat, "hitRate" | "margin"> | null | undefined) =>
@@ -26,6 +27,7 @@ export default function BacktestDetails({
   confidence,
   features,
   compareQuery,
+  scan,
 }: {
   bt: BacktestStats;
   confidence: number;
@@ -33,6 +35,8 @@ export default function BacktestDetails({
   features?: string[];
   /** Query string (epic, resolution, horizon) to compare model versions; only for the external model */
   compareQuery?: string;
+  /** Instrument and timeframe for the comparison of horizons (external model only) */
+  scan?: { epic: string; resolution: string };
 }) {
   // Strongest threshold the current prediction reaches
   const current = [...bt.byConfidence].reverse().find((c) => confidence >= c.minConfidence)?.minConfidence;
@@ -73,6 +77,7 @@ export default function BacktestDetails({
       )}
       {features && features.length > 0 && <p className="muted small">Le modèle regarde : {features.join(", ")}.</p>}
       {compareQuery && <ModelCompare query={compareQuery} />}
+      {scan && <HorizonScan epic={scan.epic} resolution={scan.resolution} />}
       <p className="muted small">
         « ± » : marge d’erreur à ~95 %. Si la réussite moins cette marge ne dépasse pas 50 %, le résultat peut s’expliquer
         par le hasard. Les stratégies naïves sont testées sur les mêmes cas : un modèle utile doit faire mieux qu’elles.

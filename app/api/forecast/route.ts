@@ -27,7 +27,8 @@ export async function GET(req: Request) {
       candles,
     });
     const series = { epic: p.instrument.epic, resolution: p.api, resMinutes: RESOLUTIONS[p.resolution].minutes, horizon };
-    after(() => recordSafe(series, candles, result));
+    // ?norecord=1: a comparison of horizons must not add series to the journal
+    if (url.searchParams.get("norecord") !== "1") after(() => recordSafe(series, candles, result));
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return handleError(err);

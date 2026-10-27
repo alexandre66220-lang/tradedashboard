@@ -4,6 +4,7 @@ import { getCandles, getSentimentFor } from "@/lib/capital";
 import { relevantEvents } from "@/lib/calendar";
 import { getCalendar } from "@/lib/calendar-source";
 import type { Candle, ForecastResponse } from "@/lib/types";
+import { signalFrom, type SignalStatus } from "@/lib/signal";
 import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
 import { MODEL_FAMILIES, type CrowdFadeStats, type JournalEntry, type JournalStats, type ModelFamily } from "./types";
@@ -47,6 +48,8 @@ export async function recordSafe(series: SeriesRef, candles: Candle[], forecast:
 export interface JournalOverview {
   configured: boolean;
   generatedAt: number;
+  /** Recording activity, to tell whether the journal is filling up */
+  activity?: { lastRecordedAt: number | null; last24h: number; total: number };
   models: Partial<Record<ModelFamily, JournalStats>>;
   /** "Go against the crowd" test, over every recorded window */
   crowd: CrowdFadeStats | null;
@@ -133,5 +136,19 @@ async function buildOverview(): Promise<JournalOverview> {
     if (part.length) models[family] = computeStats(part, spreadBpsFor);
   }
   series.sort((a, b) => a.epic.localeCompare(b.epic) || a.horizon - b.horizon || a.model.localeCompare(b.model));
-  return { configured: true, generatedAt: Date.now(), models, crowd: computeCrowdFade(all, spreadBpsFor), series };
+  const dayAgo = Date.now() - 24 * 3600_000;
+  const activity = {
+    lastRecordedAt: all.reduce<number | null>((m, e) => (m === null || e.recordedAt > m ? e.recordedAt : m), null),
+    last24h: all.filter((e) => e.recordedAt >= dayAgo).length,
+    total: all.length,
+  };
+  return { configured: true, generatedAt: Date.now(), activity, models, crowd: computeCrowdFade(all, spreadBpsFor), series };
+}
+
+/** Live status of one forecast series, for the model that produced the forecast being shown. */
+export async function signalFor(epic: string, resolution: string, horizon: number, source: string | undefined): Promise<SignalStatus> {
+  const overview = await journalOverview();
+  const family = modelFamily(source);
+  const row = overview.series.find((s) => s.epic === epic && s.resolution === resolution && s.horizon === horizon && s.model === family);
+  return signalFrom(row?.stats);
 }

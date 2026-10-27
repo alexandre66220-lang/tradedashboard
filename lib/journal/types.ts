@@ -35,6 +35,14 @@ export interface JournalEntry {
 
 /** ml2 = ML with volume / other instruments / cost target (source "ML v2…"), ml = the first ML version, builtin = regression in the app */
 export const MODEL_FAMILIES = ["ml2", "ml", "builtin"] as const;
+export const SESSIONS = [
+  { key: "asia", label: "Asie", from: 0, to: 7 },
+  { key: "europe", label: "Europe", from: 7, to: 13 },
+  { key: "us", label: "New York", from: 13, to: 21 },
+  { key: "night", label: "Nuit", from: 21, to: 24 },
+] as const;
+export type SessionKey = (typeof SESSIONS)[number]["key"];
+
 export type ModelFamily = (typeof MODEL_FAMILIES)[number];
 
 export interface JournalHit {
@@ -57,6 +65,8 @@ export interface JournalStats {
   baselines: { alwaysUp: JournalHit; lastMove: JournalHit };
   /** Hit rate depending on whether the forecast agreed with the crowd (>= 60 % on one side) */
   bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
+  /** Hit rate and net result by moment of the day (UTC hour of the forecast), intraday series only */
+  bySession: Record<SessionKey, { hit: JournalHit; netReturnPct: number }>;
   /** Hit rate depending on whether a high-impact announcement fell inside the forecast window */
   byNews: { near: JournalHit; calm: JournalHit };
   /** Net simulated return in %, one unit of notional per call, after the assumed spread */

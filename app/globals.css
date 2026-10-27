@@ -257,3 +257,23 @@ button.mini { min-height: 32px; padding: 4px 10px; }
 .panel { min-width: 0; overflow-wrap: anywhere; }
 code { overflow-wrap: anywhere; }
 .tabpanel > *, .tabpanels, .layout > * { min-width: 0; }
+
+/* live signal status: until validated, the headline is dimmed */
+.dir.unproven { opacity: .55; }
+.signal { margin-top: 6px; }
+.signal summary { cursor: pointer; list-style: none; display: inline-block; }
+.signal summary::-webkit-details-marker { display: none; }
+.signal .verdict { margin-top: 0; }
+.signal p { margin: 6px 0 0; }
+
+/* system health */
+.hlist { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 10px; }
+.hlist li { display: flex; gap: 10px; align-items: flex-start; }
+.hlist p { margin: 2px 0 0; }
+.hdot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
+.hdot.ok { background: var(--up); }
+.hdot.warn { background: var(--warn); }
+.hdot.bad { background: var(--down); }
+.hdot.off { background: var(--border); }
+.panel-head .hdot { margin: 0; }
+.health > button { margin-top: 4px; }
