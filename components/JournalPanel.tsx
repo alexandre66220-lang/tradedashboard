@@ -72,6 +72,40 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
           .
         </p>
       )}
+      {st.strategy.trades > 0 && (
+        <p className="muted small">
+          Trade simulé (stop 1,5 ATR, objectif 2 fois le stop, sinon sortie au terme ; après spread réel et frais de nuit supposés) :{" "}
+          {st.strategy.meanNetR === null ? (
+            <>{st.strategy.trades} trades (moins de 20 : pas de moyenne)</>
+          ) : (
+            <>
+              <strong className={sign(st.strategy.meanNetR)}>
+                {st.strategy.meanNetR > 0 ? "+" : ""}
+                {st.strategy.meanNetR.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} R
+              </strong>{" "}
+              par trade ± {(1.96 * (st.strategy.se ?? 0)).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} sur {st.strategy.trades} trades
+            </>
+          )}
+          {" "}· objectif atteint {Math.round((st.strategy.target / st.strategy.trades) * 100)} % · stop {Math.round((st.strategy.stop / st.strategy.trades) * 100)} % · sortie au terme{" "}
+          {Math.round((st.strategy.time / st.strategy.trades) * 100)} %.
+        </p>
+      )}
+      {st.calibration.some((c) => c.hit.samples > 0) && (
+        <p className="muted small">
+          La confiance affichée est-elle juste ? Confiance → réussite observée :{" "}
+          {st.calibration
+            .filter((c) => c.hit.samples > 0)
+            .map((c) => `${Math.round(c.from * 100)}–${Math.round(c.to * 100)} % → ${fmtHit(c.hit)}`)
+            .join(" · ")}
+          .
+        </p>
+      )}
+      {st.byVol.calm.samples + st.byVol.normal.samples + st.byVol.wild.samples > 0 && (
+        <p className="muted small">
+          Selon l’état du marché : calme {fmtHit(st.byVol.calm)} · normal {fmtHit(st.byVol.normal)} · agité {fmtHit(st.byVol.wild)} · en tendance{" "}
+          {fmtHit(st.byTrend.trend)} · sans tendance {fmtHit(st.byTrend.range)}.
+        </p>
+      )}
       {st.byConfluence.low.samples + st.byConfluence.mid.samples + st.byConfluence.high.samples > 0 && (
         <p className="muted small">
           Accord avec les indicateurs classiques (sur 5) : 0–1 accord {fmtHit(st.byConfluence.low)} · 2–3 accords {fmtHit(st.byConfluence.mid)} · 4–5 accords{" "}

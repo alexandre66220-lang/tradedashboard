@@ -1,3 +1,5 @@
+import type { Regime, TrendRegime, VolRegime } from "../regime";
+
 export interface JournalEntry {
   /** `${epic}|${resolution}|${horizon}|${window}`: one entry per horizon-long window, so entries never overlap */
   id: string;
@@ -27,6 +29,14 @@ export interface JournalEntry {
   confluence?: { agree: number; against: number; voting: number };
   /** The price was sitting on a Fibonacci retracement level (within 0.15 ATR) when the forecast was made */
   nearFib?: boolean;
+  /** ATR(14) when the forecast was made: the simulated stop and target are multiples of it */
+  atr?: number;
+  /** Spread on the broker's quote when the forecast was made, in basis points of the price (else the assumed one is used) */
+  spreadBps?: number;
+  /** Market state when the forecast was made */
+  regime?: Regime;
+  /** Simulated trade on the forecast (stop 1.5 ATR, target twice the stop, else out at the horizon), gross result in R */
+  sim?: { r: number; exit: "stop" | "target" | "time" };
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -71,6 +81,13 @@ export interface JournalStats {
   bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
   /** Hit rate and net result by moment of the day (UTC hour of the forecast), intraday series only */
   bySession: Record<SessionKey, { hit: JournalHit; netReturnPct: number }>;
+  /** Simulated trades (stop 1.5 ATR, target 2 R) after spread and financing; the mean is null below 20 trades */
+  strategy: { trades: number; meanNetR: number | null; se: number | null; target: number; stop: number; time: number };
+  /** Is the displayed confidence honest? Observed hit rate by confidence level */
+  calibration: Array<{ from: number; to: number; meanConfidence: number | null; hit: JournalHit }>;
+  /** Hit rate by volatility and by trend at the time of the forecast */
+  byVol: Record<VolRegime, JournalHit>;
+  byTrend: Record<TrendRegime, JournalHit>;
   /** Hit rate by number of technical readings agreeing with the forecast: 0-1, 2-3, 4-5 */
   byConfluence: { low: JournalHit; mid: JournalHit; high: JournalHit };
   /** Hit rate depending on whether the price sat on a Fibonacci retracement level */

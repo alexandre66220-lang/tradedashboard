@@ -16,6 +16,7 @@ import ConfluencePanel from "./ConfluencePanel";
 import HealthPanel from "./HealthPanel";
 import StatusStrip from "./StatusStrip";
 import SignalBadge from "./SignalBadge";
+import { regimeOf } from "@/lib/regime";
 import { useSignal } from "@/lib/useSignal";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
 import JournalPanel from "./JournalPanel";
@@ -228,7 +229,8 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     setHorizon(h || next.defaultHorizon);
   };
 
-  const signal = useSignal(epic, resolution, horizon, forecast?.source);
+  const regime = useMemo(() => regimeOf(candles), [candles]);
+  const signal = useSignal(epic, resolution, horizon, forecast?.source, forecast?.confidence, regime);
   const last = candles.at(-1);
   const spreadAssumed = instrument.spreadBps ?? DEFAULT_SPREAD_BPS;
   const todayPnl = tradeStats(tradeLog.trades, new Date().setHours(0, 0, 0, 0)).todayPnl;
@@ -303,7 +305,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
       </section>
 
       {meta && candles.length > 0 && <TrafficLight result={light} assumedSpreadBps={spreadAssumed} />}
-      <StatusStrip horizon={horizon} forecast={forecast} signal={signal} />
+      <StatusStrip horizon={horizon} forecast={forecast} signal={signal} regime={regime} />
 
       <section className="controls">
         <div className="seg" role="group" aria-label="Unité de temps">

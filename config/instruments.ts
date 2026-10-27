@@ -9,14 +9,19 @@ export interface Instrument extends NewsProfile {
   defaultHorizon: number;
   /** Assumed round-trip cost in basis points (1 bp = 0.01 %), used by the simulated gains of the journal. Adjust to your real spread. */
   spreadBps?: number;
+  /**
+   * Assumed overnight financing of a CFD position, in basis points per night held. ONLY AN ASSUMPTION: check your
+   * broker's real rates (they differ by instrument, direction and the weekend) and adjust.
+   */
+  financingBpsPerDay?: number;
   // newsCurrencies / newsKeywords (from NewsProfile): which economic announcements matter for this instrument
 }
 
 // Add one line per instrument. The selector appears in the UI as soon as there are 2+.
 export const INSTRUMENTS: Instrument[] = [
-  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2, newsCurrencies: ["USD"] },
-  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5, newsCurrencies: ["USD"], newsKeywords: ["crude", "opec"] },
-  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8, newsCurrencies: ["USD"] },
+  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2, financingBpsPerDay: 2, newsCurrencies: ["USD"] },
+  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5, financingBpsPerDay: 3, newsCurrencies: ["USD"], newsKeywords: ["crude", "opec"] },
+  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8, financingBpsPerDay: 5, newsCurrencies: ["USD"] },
 ];
 
 export const RESOLUTIONS = {
@@ -47,3 +52,6 @@ export function isResolutionKey(v: string | null): v is ResolutionKey {
 
 export const DEFAULT_SPREAD_BPS = 3;
 export const spreadBpsFor = (epic: string) => INSTRUMENTS.find((i) => i.epic === epic)?.spreadBps ?? DEFAULT_SPREAD_BPS;
+
+export const DEFAULT_FINANCING_BPS = 3;
+export const financingBpsFor = (epic: string) => INSTRUMENTS.find((i) => i.epic === epic)?.financingBpsPerDay ?? DEFAULT_FINANCING_BPS;

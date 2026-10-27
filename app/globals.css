@@ -307,3 +307,5 @@ code { overflow-wrap: anywhere; }
 .votes li { display: flex; gap: 10px; align-items: flex-start; }
 .votes p { margin: 2px 0 0; }
 .mark { flex: none; width: 22px; text-align: center; font-weight: 700; }
+
+.observed { margin: 4px 0 0; padding-left: 18px; }

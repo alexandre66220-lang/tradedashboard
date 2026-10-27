@@ -1,3 +1,4 @@
+import { TREND_LABEL, VOL_LABEL, type Regime } from "@/lib/regime";
 import type { SignalStatus } from "@/lib/signal";
 import type { ForecastResponse } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
@@ -7,7 +8,7 @@ const WORD = { up: "Hausse", down: "Baisse", flat: "Neutre" } as const;
 const SIGNAL_CLASS = { none: "none", watching: "none", validated: "edge", unproven: "naive", avoid: "worse" } as const;
 
 /** One line under the price: what the model says, whether it is proven, and what its backtest says. */
-export default function StatusStrip({ horizon, forecast, signal }: { horizon: number; forecast: ForecastResponse | null; signal: SignalStatus | null }) {
+export default function StatusStrip({ horizon, forecast, signal, regime }: { horizon: number; forecast: ForecastResponse | null; signal: SignalStatus | null; regime?: Regime | null }) {
   if (!forecast) return null;
   const v = forecast.backtest ? verdict(forecast.backtest) : null;
   return (
@@ -17,6 +18,7 @@ export default function StatusStrip({ horizon, forecast, signal }: { horizon: nu
       </span>
       {signal && <span className={`verdict ${SIGNAL_CLASS[signal.level]}`}>{signal.label}</span>}
       {v && <span className="chip muted">Backtest : {v.label.toLowerCase()}</span>}
+      {regime && <span className="chip muted">Marché {VOL_LABEL[regime.vol]}, {TREND_LABEL[regime.trend]}</span>}
     </section>
   );
 }

@@ -95,6 +95,15 @@ Dans le journal, les prévisions du modèle v2 sont comptées à part (« Modèl
 - **Accord des indicateurs** (`lib/indicators.ts`, panneau de l'onglet Prévision) : cinq lectures simples (moyennes, RSI, MACD, cassure des 20 dernières bougies, tendance sur l'unité de temps supérieure, obtenue en regroupant les bougies) votent hausse / baisse / neutre. Elles sont toutes calculées à partir des mêmes prix : leur accord n'est pas cinq avis indépendants.
 - **Mesure plutôt que croyance** : à chaque prévision, le journal enregistre combien de lectures allaient dans le même sens (de 0 à 5) et si le prix était sur un niveau de Fibonacci (à 0,15 ATR près). L'onglet Journal montre ensuite la réussite par niveau d'accord (0–1, 2–3, 4–5) et selon la proximité d'un niveau, avec marge d'erreur. S'il n'y a pas d'écart net, l'accord ne vaut rien de plus que le hasard.
 
+### Trade simulé, coûts réalistes, calibration, régimes de marché
+
+Quatre mesures ajoutées au journal des prévisions (tout se remplit au fil des semaines) :
+
+- **Trade simulé** : à chaque prévision haussière ou baissière, le journal rejoue un trade (entrée à la clôture de la bougie, stop à 1,5 ATR, objectif à deux fois le stop, sinon sortie au terme ; une bougie qui touche les deux compte comme un stop) et affiche le résultat moyen en **R** (1 R = le stop) après coûts, avec sa marge. C'est plus proche de la réalité que le taux de réussite seul. Aucun ordre n'est passé : c'est un calcul.
+- **Coûts réalistes** : le spread vu sur la cotation au moment de la prévision remplace le spread supposé quand il est connu (séries intraday). Pour les prévisions jour et semaine, des **frais de nuit supposés** (`financingBpsPerDay` dans `config/instruments.ts`) sont ajoutés par nuit de détention. Ces taux sont **des hypothèses** à régler d'après les vrais taux de votre courtier (ils varient selon l'instrument, le sens et le week-end).
+- **Calibration** : réussite observée par niveau de confiance (50–55, 55–60, 60–65, 65 % et plus). Dans le badge du signal, quand au moins 20 prévisions existent à ce niveau, la réussite réellement observée est indiquée à côté de la confiance affichée.
+- **Régimes de marché** (`lib/regime.ts`) : volatilité calme / normale / agitée (quart bas / haut de son historique) et tendance (rapport d'efficacité de Kaufman sur 30 bougies) enregistrés à chaque prévision ; le journal donne la réussite par état, et le résumé sous le prix affiche l'état courant et ce qui a été observé dans un marché comme celui-là.
+
 ### Journal des prévisions en direct
 
 Sur le plan gratuit de Vercel, les opérations de stockage sont comptées : le journal garde en mémoire la liste de ses fichiers (15 min) et son résumé (2 min), et le navigateur ne les redemande que toutes les 5 min. La prévision est redemandée une fois par minute (le prix, toutes les 5 secondes).
