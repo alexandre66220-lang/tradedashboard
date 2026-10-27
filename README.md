@@ -80,6 +80,15 @@ Le calendrier et le sentiment des clients ne sont **pas** des variables du modè
 
 Dans le journal, les prévisions du modèle v2 sont comptées à part (« Modèle ML v2 ») de celles de la première version (« Modèle ML v1 ») : on ne mélange pas les deux.
 
+### Signal validé, santé du système, installation sur téléphone
+
+- **Signal validé** (`lib/signal.ts`) : jugé sur le **journal en direct** seulement, jamais sur le backtest. « Validé » exige au moins 200 prévisions jugées, une réussite au-dessus de 50 % au-delà de la marge d'erreur, meilleure que les stratégies naïves, et un résultat positif après spread. Avant : « en observation (n / 200) » ; sinon « non validé » ou « à éviter ». Tant que ce n'est pas validé, le titre de la prévision est grisé. Route : `GET /api/journal/signal`.
+- **Réussite par moment de la journée** dans le journal (Asie 0–7 h, Europe 7–13 h, New York 13–21 h, nuit 21–24 h, heures UTC), avec le net par session.
+- **Comparer les horizons** (15 / 30 / 60 / 120 min), dans « Détail du backtest » : même modèle, même méthode, rien n'est écrit dans le journal.
+- **Santé du système** (onglet Alertes, `GET /api/health`) : Capital.com, service ML, stockage, journal (dernier relevé, nombre sur 24 h), calendrier, réglages (`CRON_SECRET`, `NTFY_TOPIC` : seulement défini ou non, jamais la valeur). Le journal passe à « à surveiller » après 90 min sans relevé, « problème » après 6 h.
+- **Résumé sous le prix** (prévision, signal, verdict du backtest), **graphique des instruments sur 24 h** (variation en %), **vue compacte** (case « Compact » : masque les textes d'explication, mémorisée sur l'appareil).
+- **Installation sur l'écran d'accueil** : `app/manifest.ts` et les icônes `app/icon.png` / `app/apple-icon.png` (publiques : le téléphone les lit sans session, elles ne contiennent aucune donnée). Sur iPhone : Safari → Partager → « Sur l'écran d'accueil ». Pas de mode hors ligne : les données sont en direct.
+
 ### Journal des prévisions en direct
 
 Sur le plan gratuit de Vercel, les opérations de stockage sont comptées : le journal garde en mémoire la liste de ses fichiers (15 min) et son résumé (2 min), et le navigateur ne les redemande que toutes les 5 min. La prévision est redemandée une fois par minute (le prix, toutes les 5 secondes).

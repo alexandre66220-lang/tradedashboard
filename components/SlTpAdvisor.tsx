@@ -162,7 +162,7 @@ export default function SlTpAdvisor({ epic, candles, forecast, decimals, resMinu
                 </strong>{" "}
                 (1 R = le risque pris).
               </p>
-              <p className="muted small">
+              <p className="muted small explain">
                 Seuil d’équilibre : il faudrait toucher l’objectif {pct(1 / (1 + selected.rr))} du temps, sans compter le spread. Même test à l’envers (
                 {side === "long" ? "vente" : "achat"}) : <Expect s={selected.otherSide} />. Un écart entre les deux vient surtout de la tendance
                 récente.

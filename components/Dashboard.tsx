@@ -11,7 +11,9 @@ import { useAlerts } from "@/lib/useAlerts";
 import { useCalendar } from "@/lib/useCalendar";
 import { useTrades } from "@/lib/useTrades";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
+import CompareChart from "./CompareChart";
 import HealthPanel from "./HealthPanel";
+import StatusStrip from "./StatusStrip";
 import SignalBadge from "./SignalBadge";
 import { useSignal } from "@/lib/useSignal";
 import BacktestDetails, { fmtHit, VerdictBadge } from "./BacktestDetails";
@@ -84,6 +86,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const instrument = instruments.find((i) => i.epic === epic) ?? instruments[0];
   const [resolution, setResolution] = useState<ResolutionKey>(DEFAULT_RESOLUTION);
   const [horizon, setHorizon] = useState(instrument.defaultHorizon);
+  const [compact, setCompact] = useState(false);
   const [showBand, setShowBand] = useState(true);
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
@@ -134,6 +137,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   useEffect(() => {
     setResolution(readPref("tf", DEFAULT_RESOLUTION, Object.keys(RESOLUTIONS)));
     setShowBand(readPref("band", "1", ["0", "1"]) === "1");
+    setCompact(readPref<string>("compact", "0", ["0", "1"]) === "1");
     const e = readPref("epic", instruments[0].epic, instruments.map((i) => i.epic));
     setEpic(e);
     const h = Number(readPref("h:" + e, "", HORIZON_CHOICES.map(String)));
@@ -248,7 +252,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const decimals = last && last.close < 10 ? 5 : 2;
 
   return (
-    <main className="wrap">
+    <main className={`wrap${compact ? " compact" : ""}`}>
       <header className="top">
         <div className="title">
           {instruments.length > 1 ? (
@@ -290,6 +294,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
       </section>
 
       {meta && candles.length > 0 && <TrafficLight result={light} assumedSpreadBps={spreadAssumed} />}
+      <StatusStrip horizon={horizon} forecast={forecast} signal={signal} />
 
       <section className="controls">
         <div className="seg" role="group" aria-label="Unité de temps">
@@ -334,6 +339,17 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             }}
           />
           Bande
+        </label>
+        <label className="field check" title="Masque les textes d'explication pour ne garder que les chiffres">
+          <input
+            type="checkbox"
+            checked={compact}
+            onChange={(e) => {
+              setCompact(e.target.checked);
+              writePref("compact", e.target.checked ? "1" : "0");
+            }}
+          />
+          Compact
         </label>
       </section>
 
@@ -416,6 +432,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             }}
           />
           <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
+          <CompareChart selected={epic} onSelect={selectEpic} />
           </div>
           <div role="tabpanel" id="panel-trade" aria-labelledby="tab-trade" className="tabpanel" hidden={activeTab !== "trade"}>
           <SlTpAdvisor

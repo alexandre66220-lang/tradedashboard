@@ -100,7 +100,7 @@ export default function HorizonScan({ epic, resolution }: { epic: string; resolu
               })}
             </tbody>
           </table>
-          <p className="muted small">
+          <p className="muted small explain">
             Même modèle, même méthode, seul l’horizon change (le calcul peut prendre une minute). Un horizon n’est intéressant que si sa marge
             d’erreur exclut 50 % <em>et</em> que le net est positif ; avec quatre horizons comparés, un résultat isolé peut être de la chance.
             Seul le journal en direct tranche.

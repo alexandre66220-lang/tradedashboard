@@ -78,7 +78,7 @@ export default function BacktestDetails({
       {features && features.length > 0 && <p className="muted small">Le modèle regarde : {features.join(", ")}.</p>}
       {compareQuery && <ModelCompare query={compareQuery} />}
       {scan && <HorizonScan epic={scan.epic} resolution={scan.resolution} />}
-      <p className="muted small">
+      <p className="muted small explain">
         « ± » : marge d’erreur à ~95 %. Si la réussite moins cette marge ne dépasse pas 50 %, le résultat peut s’expliquer
         par le hasard. Les stratégies naïves sont testées sur les mêmes cas : un modèle utile doit faire mieux qu’elles.
         Les lignes « confiance ≥ » ne gardent que les prédictions les plus franches.
