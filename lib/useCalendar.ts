@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { CalendarEvent } from "./calendar";
+import { readJson, RETRY_AFTER_FAILURE_MS, unexpectedResponse } from "./readJson";
 
 const POLL_MS = 5 * 60_000;
 
@@ -14,6 +15,7 @@ export function useCalendar() {
   useEffect(() => {
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failed = false;
     const run = async () => {
       clearTimeout(timer);
       if (!document.hidden) {
@@ -23,16 +25,19 @@ export function useCalendar() {
             window.location.href = "/login";
             return;
           }
-          const body = await res.json();
-          if (!res.ok) throw new Error(body?.error?.message ?? `Erreur ${res.status}`);
-          setEvents(body.events as CalendarEvent[]);
+          const body = await readJson<{ events?: CalendarEvent[]; stale?: boolean; error?: { message?: string } }>(res);
+          if (!body) throw unexpectedResponse(res);
+          if (!res.ok || !body.events) throw new Error(body.error?.message ?? `Erreur ${res.status}`);
+          setEvents(body.events);
           setStale(Boolean(body.stale));
           setError(null);
+          failed = false;
         } catch (e) {
+          failed = true;
           if (!ctrl.signal.aborted) setError((e as Error).message || "Serveur injoignable.");
         }
       }
-      if (!ctrl.signal.aborted) timer = setTimeout(run, POLL_MS);
+      if (!ctrl.signal.aborted) timer = setTimeout(run, failed ? RETRY_AFTER_FAILURE_MS : POLL_MS);
     };
     const onVisible = () => !document.hidden && run();
     run();

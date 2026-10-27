@@ -5,6 +5,7 @@ import { OUTLOOKS } from "@/config/instruments";
 import type { ApiError, OutlookCell, OutlookResponse } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
 import { fmtHit } from "./BacktestDetails";
+import { readJson, RETRY_AFTER_FAILURE_MS, unexpectedResponse } from "@/lib/readJson";
 import Disclaimer from "./Disclaimer";
 
 const POLL_MS = 5 * 60_000;
@@ -47,6 +48,7 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
   useEffect(() => {
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failed = false;
     const run = async () => {
       clearTimeout(timer);
       if (!document.hidden) {
@@ -56,16 +58,19 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
             window.location.href = "/login";
             return;
           }
-          const body = (await res.json()) as OutlookResponse | ApiError;
+          const body = await readJson<OutlookResponse | ApiError>(res);
+          if (!body) throw unexpectedResponse(res);
           if (!res.ok || "error" in body) throw new Error("error" in body ? body.error.message : `Erreur ${res.status}`);
           setData(body);
           setError(null);
+          failed = false;
         } catch (e) {
           if (ctrl.signal.aborted) return;
+          failed = true;
           setError((e as Error).message || "Serveur injoignable.");
         }
       }
-      if (!ctrl.signal.aborted) timer = setTimeout(run, POLL_MS);
+      if (!ctrl.signal.aborted) timer = setTimeout(run, failed ? RETRY_AFTER_FAILURE_MS : POLL_MS);
     };
     const onVisible = () => !document.hidden && run();
     run();
