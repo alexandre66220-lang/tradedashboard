@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import alerts, { config as alertsConfig } from "../netlify/functions/cron-alerts.mjs";
 import journal, { config as journalConfig } from "../netlify/functions/cron-journal.mjs";
+import daily, { config as dailyConfig } from "../netlify/functions/cron-journal-daily.mjs";
 import record, { config as recordConfig } from "../netlify/functions/journal-record-background.mjs";
 
 const ctx = { site: { url: "https://dash.example.app" } };
@@ -21,6 +22,7 @@ describe("Netlify scheduled functions", () => {
   it("are scheduled in UTC cron syntax and the recorder is a background function", () => {
     expect(alertsConfig.schedule).toBe("*/5 * * * *");
     expect(journalConfig.schedule).toBe("*/30 * * * *");
+    expect(dailyConfig.schedule).toBe("5 7 * * *");
     expect(recordConfig.background).toBe(true);
   });
 
@@ -38,8 +40,11 @@ describe("Netlify scheduled functions", () => {
     vi.stubGlobal("fetch", fetchMock);
     await journal(req(), ctx);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://dash.example.app/.netlify/functions/journal-record-background");
+    expect(url).toBe("https://dash.example.app/.netlify/functions/journal-record-background?scope=intraday");
     expect(init.method).toBe("POST");
+    fetchMock.mockClear();
+    await daily(req(), ctx);
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toContain("?scope=daily");
   });
 
   it("do nothing without the secret, and never throw when the site is down", async () => {
@@ -64,5 +69,9 @@ describe("Netlify scheduled functions", () => {
     await record(req("Bearer s3cret"), ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record");
+    await record(new Request("https://dash.example.app/x?scope=intraday", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
+    await record(new Request("https://dash.example.app/x?scope=%22evil", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record?scope=intraday");
+    expect((fetchMock.mock.calls[2] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record"); // unknown scope: ignored
   });
 });

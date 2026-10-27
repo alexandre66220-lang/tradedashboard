@@ -53,11 +53,45 @@ export interface JournalOverview {
   series: Array<{ epic: string; name: string; resolution: string; label: string; horizon: number; model: ModelFamily; stats: JournalStats }>;
 }
 
-export async function journalOverview(): Promise<JournalOverview> {
+// The overview reads every series file: it is kept for a short while, as is the list of files (which almost never
+// changes). Storage operations are metered on the free plans.
+const OVERVIEW_TTL_MS = 2 * 60_000;
+const KEYS_TTL_MS = 15 * 60_000;
+let overviewCache: { at: number; value: Promise<JournalOverview> } | null = null;
+let keysCache: { at: number; value: Promise<string[]> } | null = null;
+
+export function __resetOverviewCache() {
+  overviewCache = null;
+  keysCache = null;
+}
+
+export function journalOverview(): Promise<JournalOverview> {
+  const now = Date.now();
+  if (overviewCache && now - overviewCache.at < OVERVIEW_TTL_MS) return overviewCache.value;
+  const value = buildOverview();
+  overviewCache = { at: now, value };
+  value.catch(() => {
+    if (overviewCache?.value === value) overviewCache = null;
+  });
+  return value;
+}
+
+async function seriesKeys(storage: NonNullable<ReturnType<typeof getStorage>>): Promise<string[]> {
+  const now = Date.now();
+  if (keysCache && now - keysCache.at < KEYS_TTL_MS) return keysCache.value;
+  const value = storage.list();
+  keysCache = { at: now, value };
+  value.catch(() => {
+    if (keysCache?.value === value) keysCache = null;
+  });
+  return value;
+}
+
+async function buildOverview(): Promise<JournalOverview> {
   const storage = getStorage();
   if (!storage) return { configured: false, generatedAt: Date.now(), models: {}, crowd: null, series: [] };
 
-  const keys = await storage.list();
+  const keys = await seriesKeys(storage);
   const all: JournalEntry[] = [];
   const series: JournalOverview["series"] = [];
 

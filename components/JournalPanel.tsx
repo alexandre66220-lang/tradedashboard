@@ -8,7 +8,7 @@ import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
 import Disclaimer from "./Disclaimer";
 
-const POLL_MS = 60_000;
+const POLL_MS = 5 * 60_000;
 const MODEL_LABEL: Record<ModelFamily, string> = { ml2: "Modèle ML v2", ml: "Modèle ML v1", builtin: "Modèle intégré" };
 const MODEL_SHORT: Record<ModelFamily, string> = { ml2: "ML v2", ml: "ML v1", builtin: "intégré" };
 

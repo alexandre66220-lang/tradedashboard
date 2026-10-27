@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@netlify/blobs": "^11.1.6",
     "@vercel/blob": "^2.8.2",
     "lightweight-charts": "^5.2.1",
     "next": "^16.4.3",

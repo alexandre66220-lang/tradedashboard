@@ -22,11 +22,14 @@ export async function GET(req: Request) {
   }
   if (!getStorage()) return NextResponse.json({ recorded: 0, note: "journal non configuré" });
 
+  // ?scope=intraday: only the short forecasts (every 30 min); ?scope=daily: only the daily and weekly outlooks (once a day,
+  // they cannot change faster, and each one costs a model run); no scope: everything.
+  const scope = new URL(req.url).searchParams.get("scope");
   try {
     // Per instrument: the default intraday forecast, plus the daily and weekly outlooks
     const jobs = INSTRUMENTS.flatMap((inst) => [
-      { epic: inst.epic, resolution: "MINUTE_5", resMinutes: 5, horizon: inst.defaultHorizon },
-      ...OUTLOOKS.map((o) => ({ epic: inst.epic, resolution: o.api, resMinutes: o.minutes, horizon: o.minutes })),
+      ...(scope === "daily" ? [] : [{ epic: inst.epic, resolution: "MINUTE_5", resMinutes: 5, horizon: inst.defaultHorizon }]),
+      ...(scope === "intraday" ? [] : OUTLOOKS.map((o) => ({ epic: inst.epic, resolution: o.api, resMinutes: o.minutes, horizon: o.minutes }))),
     ]);
     const results = await Promise.allSettled(
       jobs.map(async (series) => {

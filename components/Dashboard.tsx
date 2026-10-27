@@ -33,6 +33,8 @@ interface ErrorState {
   message: string;
 }
 
+const FORECAST_EVERY_MS = 60_000;
+
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal, cache: "no-store" });
   if (res.status === 401) {
@@ -135,13 +137,18 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     setHorizon(h || (instruments.find((i) => i.epic === e) ?? instruments[0]).defaultHorizon);
   }, [instruments]);
 
+  // The forecast only changes with a new candle: it is asked for once a minute, the price every few seconds.
+  const forecastAt = useRef({ key: "", at: 0 });
+
   const tick = useCallback(
     async (signal: AbortSignal) => {
       const q = `epic=${encodeURIComponent(epic)}&resolution=${resolution}`;
+      const fkey = `${epic}|${resolution}|${horizon}`;
+      const wantForecast = forecastAt.current.key !== fkey || Date.now() - forecastAt.current.at >= FORECAST_EVERY_MS;
       try {
         const [c, f] = await Promise.allSettled([
           getJson<CandlesResponse>(`/api/candles?${q}`, signal),
-          getJson<ForecastResponse>(`/api/forecast?${q}&horizon=${horizon}`, signal),
+          wantForecast ? getJson<ForecastResponse>(`/api/forecast?${q}&horizon=${horizon}`, signal) : Promise.resolve(null),
         ]);
         if (signal.aborted) return;
         if (c.status === "fulfilled") {
@@ -154,8 +161,11 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           setError({ code: e.code ?? "NETWORK", message: e.code ? e.message : "Serveur injoignable. Vérifiez votre connexion." });
         }
         if (f.status === "fulfilled") {
-          setForecast(f.value);
-          setForecastError(null);
+          if (f.value) {
+            forecastAt.current = { key: fkey, at: Date.now() };
+            setForecast(f.value);
+            setForecastError(null);
+          }
         } else {
           setForecastError((f.reason as Error).message);
         }
