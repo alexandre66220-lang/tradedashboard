@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { __resetJournalCache, computeStats, parseSeriesKey, recordForecast, resolveEntries, resolveSeries, seriesKey, type SeriesRef } from "@/lib/journal/journal";
+import { __resetJournalCache, computeCrowdFade, computeStats, parseSeriesKey, recordForecast, resolveEntries, resolveSeries, seriesKey, type SeriesRef } from "@/lib/journal/journal";
 import { memoryStorage } from "@/lib/journal/storage";
 import type { Candle } from "@/lib/types";
 
@@ -91,5 +91,28 @@ describe("journal", () => {
 
   it("round-trips series keys", () => {
     expect(parseSeriesKey(seriesKey(series))).toEqual({ epic: "GOLD", resolution: "MINUTE_5", horizon: 30 });
+  });
+
+  it("tests going against the crowd by how lopsided it was, spread included", () => {
+    const mk = (i: number, sentiment: number | undefined, dir: "up" | "down" | "flat", outcome: number) => ({
+      id: String(i), epic: "GOLD", resolution: "MINUTE_5", resMinutes: 5, horizon: 30, steps: 6, t: T0 + i * 1800, recordedAt: 1000 + i,
+      price: 100, direction: dir, confidence: 0.6, target: 100, source: "ML", ref: 100, prev: 100, outcome, ...(sentiment === undefined ? {} : { sentiment }),
+    });
+    const entries = [
+      ...Array.from({ length: 15 }, (_, i) => mk(i, 80, "up", 99)), // crowd 80 % long, price falls: fading wins +1 %
+      ...Array.from({ length: 5 }, (_, i) => mk(20 + i, 80, "down", 101)), // crowd long, price rises: fading loses
+      ...Array.from({ length: 20 }, (_, i) => mk(30 + i, 25, "flat", 101)), // crowd 75 % short, price rises: fading wins (abstentions count)
+      ...Array.from({ length: 3 }, (_, i) => mk(60 + i, 65, "up", 101)), // moderate crowd long, price rises: fading loses
+      mk(70, 50, "up", 101), // split crowd: not tested
+      mk(71, undefined, "up", 101), // no sentiment recorded: ignored
+      { ...mk(72, 80, "up", 99), outcome: undefined }, // pending: ignored
+    ];
+    const c = computeCrowdFade(entries, () => 10);
+    expect(c.judged).toBe(44);
+    expect(c.extreme.fade).toMatchObject({ hits: 35, samples: 40 });
+    expect(c.extreme.fade.hitRate).toBeCloseTo(0.875);
+    expect(c.extreme.grossReturnPct).toBeCloseTo(35 - 5, 5);
+    expect(c.extreme.netReturnPct).toBeCloseTo(30 - 40 * 0.1, 5);
+    expect(c.moderate.fade).toMatchObject({ hits: 0, samples: 3, hitRate: null });
   });
 });

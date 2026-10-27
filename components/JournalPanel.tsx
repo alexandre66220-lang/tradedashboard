@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { JournalOverview } from "@/lib/journal/service";
-import type { JournalHit, JournalStats } from "@/lib/journal/types";
+import type { CrowdFadeGroup, CrowdFadeStats, JournalHit, JournalStats } from "@/lib/journal/types";
 import { verdict } from "@/lib/verdict";
 import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
@@ -59,6 +59,62 @@ function ModelBlock({ family, st }: { family: "ml" | "builtin"; st: JournalStats
         </p>
       )}
       <Curve points={st.curve} label="Gains simulés cumulés" />
+    </div>
+  );
+}
+
+function fadeVerdict(g: CrowdFadeGroup): { level: string; label: string } {
+  const { hitRate, margin } = g.fade;
+  if (hitRate == null || margin == null) return { level: "none", label: "Pas assez de données" };
+  if (hitRate - margin > 0.5 && g.netReturnPct > 0) return { level: "edge", label: "Signal contrarien" };
+  if (hitRate + margin < 0.5) return { level: "worse", label: "La foule a plutôt raison" };
+  return { level: "none", label: "Pas distinguable du hasard" };
+}
+
+function CrowdBlock({ crowd }: { crowd: CrowdFadeStats }) {
+  const rows: Array<[string, string, CrowdFadeGroup]> = [
+    ["Foule très d’un côté", "≥ 70 % ou ≤ 30 % d’acheteurs", crowd.extreme],
+    ["Foule plutôt d’un côté", "60–70 % ou 30–40 % d’acheteurs", crowd.moderate],
+  ];
+  return (
+    <div className="jm">
+      <div className="jm-head">
+        <strong>Aller contre la foule ?</strong>
+      </div>
+      <p className="muted small">
+        Test indépendant du modèle : à chaque fenêtre, on parie à l’inverse du côté où se trouve la majorité des clients Capital.com, puis on juge
+        sur le vrai prix à l’échéance. {crowd.judged} fenêtres jugées avec un sentiment enregistré.
+      </p>
+      <div className="bt">
+      <table>
+        <thead>
+          <tr>
+            <th />
+            <th>Jugées</th>
+            <th>Réussite</th>
+            <th>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, hint, g]) => {
+            const v = fadeVerdict(g);
+            return (
+              <tr key={name}>
+                <th scope="row">
+                  {name}
+                  <span className="muted small"> · {hint}</span>
+                  <br />
+                  <span className={`verdict ${v.level}`}>{v.label}</span>
+                </th>
+                <td>{g.fade.samples}</td>
+                <td>{fmtHit(g.fade)}</td>
+                <td className={sign(g.netReturnPct)}>{g.fade.samples ? fmtPct(g.netReturnPct) : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      </div>
     </div>
   );
 }
@@ -133,6 +189,8 @@ export default function JournalPanel() {
             <ModelBlock key={f} family={f} st={data.models[f]!} />
           ))}
 
+          {data.crowd && data.crowd.judged > 0 && <CrowdBlock crowd={data.crowd} />}
+
           <details className="bt">
             <summary>Détail par instrument et horizon</summary>
             <table>
@@ -167,7 +225,9 @@ export default function JournalPanel() {
       <Disclaimer>
         Gains simulés : une unité par prévision (haussière ou baissière, les « neutres » sont ignorées), après un spread supposé par instrument
         (réglable dans <code>config/instruments.ts</code>), sans frais de financement ni glissement. Tant qu’il y a moins de 20 prévisions
-        jugées, aucun taux n’est affiché : trop peu pour conclure. Ce n’est pas un conseil d’investissement.
+        jugées, aucun taux n’est affiché : trop peu pour conclure. Pour le test « contre la foule », les fenêtres voisines d’un même instrument se
+        ressemblent (le sentiment change lentement) : la marge d’erreur affichée est donc plutôt optimiste. Ce n’est pas un conseil
+        d’investissement.
       </Disclaimer>
     </section>
   );
