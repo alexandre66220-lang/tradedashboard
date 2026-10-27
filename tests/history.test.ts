@@ -27,16 +27,17 @@ function fakeCapital(opts: { ignoreRange?: boolean; failOlder?: boolean; maxRang
     const max = Number(url.searchParams.get("max") ?? 10);
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
-    // Like the real API: a date range cannot be combined with max, and wide ranges can be refused
+    // Like the real API (as seen in production): max defaults to 10, both ends of a range are inclusive, and a
+    // range holding more points than max is refused ("error.invalid.max.daterange")
     const bad = (code: string) => new Response(JSON.stringify({ errorCode: code }), { status: 400 });
-    if (from && to && hasMax) return bad("error.invalid.max.daterange");
+    const lo = from ? Date.parse(`${from}Z`) / 1000 : 0;
+    const hi = to ? Date.parse(`${to}Z`) / 1000 : 0;
+    if (from && to && Math.floor((hi - lo) / STEP) + 1 > max) return bad("error.invalid.max.daterange");
     if (to && opts.failOlder) return new Response("{}", { status: 500 });
     let times = Array.from({ length: TOTAL }, (_, i) => END - (TOTAL - 1 - i) * STEP);
     if (from && to && !opts.ignoreRange) {
-      const lo = Date.parse(`${from}Z`) / 1000;
-      const hi = Date.parse(`${to}Z`) / 1000;
       if (opts.maxRangeSteps && (hi - lo) / STEP > opts.maxRangeSteps) return bad("error.invalid.max.daterange");
-      times = times.filter((t) => t >= lo && t <= hi).slice(0, 1000);
+      times = times.filter((t) => t >= lo && t <= hi).slice(-max);
     } else if (from && to) {
       times = times.slice(-10); // an API that ignores the range answers with its default of 10 candles
     } else {
@@ -108,12 +109,17 @@ describe("getHistory", () => {
     warn.mockRestore();
   });
 
-  it("asks for a date range without max, which the real API refuses to combine", async () => {
+  it("keeps each date range under max, as the real API requires (both ends inclusive, max defaults to 10)", async () => {
     const { calls } = fakeCapital();
     await getHistory("GOLD", "MINUTE_5", 2500);
     const ranged = calls.filter((c) => c.includes("from="));
     expect(ranged.length).toBeGreaterThan(0);
-    expect(ranged.every((c) => !c.includes("max="))).toBe(true);
+    for (const c of ranged) {
+      const q = new URLSearchParams(c);
+      const points = Math.floor((Date.parse(`${q.get("to")}Z`) - Date.parse(`${q.get("from")}Z`)) / 1000 / STEP) + 1;
+      expect(Number(q.get("max"))).toBe(1000);
+      expect(points).toBeLessThanOrEqual(1000);
+    }
   });
 
   it("narrows the date range when the API says it is too wide, and still builds the history", async () => {
