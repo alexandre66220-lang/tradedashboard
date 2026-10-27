@@ -183,6 +183,18 @@ et attend une réponse au même format que `/api/forecast`. `resolution` peut au
 
 Le graphique, le prix et le feu « trade / pas de trade » restent en haut. En dessous, une **barre d'onglets** (fixée en bas de l'écran sur téléphone) évite de défiler indéfiniment : **Prévision** (prévision, jour / semaine, sentiment), **Trade** (conseil SL / TP, calculateur de risque), **Journal** (mes trades, journal des prévisions) et **Alertes** (calendrier, notifications). Un point rouge / orange sur « Trade » signale que le feu n'est pas vert. Les textes d'avertissement sont repliés sous « À savoir ». Sur grand écran (≥ 900 px) la prévision se place à côté du graphique et les autres panneaux s'affichent en colonnes sous l'onglet choisi. Le dernier onglet est mémorisé.
 
+## Déployer sur Netlify (en plus de Vercel, ou à la place)
+
+Le même code tourne sur les deux : `netlify.toml` et le dossier `netlify/functions/` ne gênent pas Vercel.
+
+1. **Netlify → Add new project → Import from Git** → ce dépôt (la branche `main`). Netlify détecte Next.js tout seul (runtime installé au build). Un projet vide `tradedashboard-alcal` a déjà été créé ; on peut aussi y relier le dépôt.
+2. **Variables d'environnement** (Project configuration → Environment variables, portées *Builds*, *Functions* et *Runtime*) : les mêmes que sur Vercel — `CAPITAL_API_KEY`, `CAPITAL_IDENTIFIER`, `CAPITAL_API_PASSWORD`, `CAPITAL_ENV` (`demo`), `DASHBOARD_PASSWORD`, `CRON_SECRET`, `FORECAST_SERVICE_URL`, `FORECAST_SERVICE_TOKEN`, `NTFY_TOPIC`, `BLOB_READ_WRITE_TOKEN` (le stockage Blob Vercel fonctionne depuis Netlify avec son jeton ; si les deux sites partagent le même jeton, ils partagent aussi journal, trades et alertes). Toute modification de variable demande un **redéploiement**.
+3. **Le service ML reste sur Vercel** (projet `tradedashboard-forecast`) : Netlify n'exécute pas Python. Le dashboard l'appelle par `FORECAST_SERVICE_URL`.
+4. **Tâches planifiées incluses**, sans service externe : `netlify/functions/cron-alerts.mts` (alertes, toutes les 5 min, UTC) et `cron-journal.mts` (journal des prévisions, toutes les 30 min, qui passe le relais à la fonction d'arrière-plan `journal-record-background.mts` pour dépasser les 30 s des fonctions planifiées). Elles appellent `/api/alerts/check` et `/api/journal/record` avec `Bearer $CRON_SECRET`. Elles ne tournent que sur le déploiement publié (pas sur les aperçus). Si un service externe (cron-job.org) appelle déjà ces adresses côté Vercel, ne le laissez pas appeler aussi Netlify : deux déclencheurs ne cassent rien (une seule prévision est gardée par fenêtre), mais les alertes pourraient être envoyées en double.
+5. Durées : une fonction synchrone peut durer jusqu'à 60 s sur Netlify, comme `maxDuration` sur Vercel (cet export est ignoré par Netlify).
+
+À surveiller après le premier déploiement : que l'enregistrement du journal après chaque prévision (`after()`) fonctionne sur Netlify (sinon, c'est la tâche planifiée qui remplit le journal), et que la connexion au site marche (`proxy.ts` est exécuté comme middleware).
+
 ## Sécurité
 
 - Tout le site (pages et API) passe par `proxy.ts` (le nom du middleware dans Next.js 16). Sans cookie valide, les pages renvoient vers `/login` et l'API répond 401.

@@ -1,0 +1,9 @@
+# Netlify deployment (the Vercel one keeps working: both read the same code).
+# Next.js is detected automatically (the Netlify runtime is installed at build time).
+# Secrets are NOT set here: add them in Project configuration > Environment variables (scopes: Builds + Functions + Runtime).
+
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
