@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetCapitalState, getHistory, toCandles } from "@/lib/capital";
+import { __resetCapitalState, __setRateLimitWait, getCandles, getHistory, toCandles } from "@/lib/capital";
 import { enrichRequest } from "@/lib/forecast/enrich";
 import { INSTRUMENTS } from "@/config/instruments";
 
@@ -11,24 +11,34 @@ const iso = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 19);
 const price = (v: number) => ({ bid: v, ask: v + 0.2 });
 
 /** A fake Capital.com: TOTAL five-minute candles ending at END, served like the real prices endpoint (max / from / to). */
-function fakeCapital(opts: { ignoreRange?: boolean; failOlder?: boolean } = {}) {
+function fakeCapital(opts: { ignoreRange?: boolean; failOlder?: boolean; maxRangeSteps?: number; throttle?: { login?: number; prices?: number } } = {}) {
   const calls: string[] = [];
+  let loginThrottle = opts.throttle?.login ?? 0;
+  let pricesThrottle = opts.throttle?.prices ?? 0;
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (init?.method === "POST") {
+      if (loginThrottle-- > 0) return new Response(JSON.stringify({ errorCode: "error.too-many.requests" }), { status: 429 });
       return new Response("{}", { status: 200, headers: { CST: "c", "X-SECURITY-TOKEN": "t" } });
     }
+    if (pricesThrottle-- > 0) return new Response(JSON.stringify({ errorCode: "error.too-many.requests" }), { status: 429 });
     calls.push(url.search);
+    const hasMax = url.searchParams.has("max");
     const max = Number(url.searchParams.get("max") ?? 10);
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
+    // Like the real API: a date range cannot be combined with max, and wide ranges can be refused
+    const bad = (code: string) => new Response(JSON.stringify({ errorCode: code }), { status: 400 });
+    if (from && to && hasMax) return bad("error.invalid.max.daterange");
     if (to && opts.failOlder) return new Response("{}", { status: 500 });
     let times = Array.from({ length: TOTAL }, (_, i) => END - (TOTAL - 1 - i) * STEP);
     if (from && to && !opts.ignoreRange) {
       const lo = Date.parse(`${from}Z`) / 1000;
       const hi = Date.parse(`${to}Z`) / 1000;
-      times = times.filter((t) => t >= lo && t <= hi);
-      times = times.slice(0, max);
+      if (opts.maxRangeSteps && (hi - lo) / STEP > opts.maxRangeSteps) return bad("error.invalid.max.daterange");
+      times = times.filter((t) => t >= lo && t <= hi).slice(0, 1000);
+    } else if (from && to) {
+      times = times.slice(-10); // an API that ignores the range answers with its default of 10 candles
     } else {
       times = times.slice(-max);
     }
@@ -91,9 +101,46 @@ describe("getHistory", () => {
 
   it("does not loop when the API ignores from / to", async () => {
     const { calls } = fakeCapital({ ignoreRange: true });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const h = await getHistory("GOLD", "MINUTE_5", 4000);
     expect(h).toHaveLength(1000);
-    expect(calls.length).toBeLessThanOrEqual(5);
+    expect(calls.length).toBeLessThanOrEqual(3);
+    warn.mockRestore();
+  });
+
+  it("asks for a date range without max, which the real API refuses to combine", async () => {
+    const { calls } = fakeCapital();
+    await getHistory("GOLD", "MINUTE_5", 2500);
+    const ranged = calls.filter((c) => c.includes("from="));
+    expect(ranged.length).toBeGreaterThan(0);
+    expect(ranged.every((c) => !c.includes("max="))).toBe(true);
+  });
+
+  it("narrows the date range when the API says it is too wide, and still builds the history", async () => {
+    const { calls } = fakeCapital({ maxRangeSteps: 300 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const h = await getHistory("GOLD", "MINUTE_5", 2500);
+    expect(h.length).toBeGreaterThanOrEqual(2500);
+    expect(h.every((c, i) => i === 0 || c.time - h[i - 1].time === STEP)).toBe(true);
+    expect(calls.length).toBeLessThan(40);
+    warn.mockRestore();
+  });
+
+  it("waits and retries when Capital.com answers 429, for the session and for prices", async () => {
+    __setRateLimitWait(1);
+    const { calls } = fakeCapital({ throttle: { login: 2, prices: 2 } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await getCandles("GOLD", "MINUTE_5", 100)).toHaveLength(100);
+    expect(calls).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("gives up cleanly when Capital.com keeps refusing", async () => {
+    __setRateLimitWait(1);
+    fakeCapital({ throttle: { login: 10 } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(getCandles("GOLD", "MINUTE_5", 100)).rejects.toMatchObject({ code: "RATE_LIMITED" });
+    warn.mockRestore();
   });
 
   it("falls back to the recent candles when older pages fail, and does not retry right away", async () => {

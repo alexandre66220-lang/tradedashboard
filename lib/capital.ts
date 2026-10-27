@@ -40,6 +40,8 @@ export class CapitalError extends Error {
     public code: CapitalErrorCode,
     message: string,
     public httpStatus = 502,
+    /** Error code given by Capital.com itself, e.g. "error.invalid.max.daterange" */
+    public upstream?: string,
   ) {
     super(message);
   }
@@ -79,6 +81,31 @@ interface Session {
 let session: Session | null = null;
 let loginInFlight: Promise<Session> | null = null;
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Capital.com allows few calls per second (about 10, and session creation once per second). A page load makes several
+// calls at once, and on Vercel each one may run in a separate instance: keep the bursts small and retry politely on 429.
+const MAX_CONCURRENT = 4;
+let rateLimitWaitMs = 1_100;
+/** Tests only: do not wait seconds between retries. */
+export function __setRateLimitWait(ms: number) {
+  rateLimitWaitMs = ms;
+}
+const RATE_LIMIT_RETRIES = 2;
+let active = 0;
+const waiting: Array<() => void> = [];
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
 async function rawFetch(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -106,11 +133,16 @@ async function login(): Promise<Session> {
   const cfg = config();
   const path = "/api/v1/session";
   assertAllowed("POST", path);
-  const res = await rawFetch(cfg.baseUrl + path, {
-    method: "POST",
-    headers: { "X-CAP-API-KEY": cfg.apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ identifier: cfg.identifier, password: cfg.password, encryptedPassword: false }),
-  });
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await rawFetch(cfg.baseUrl + path, {
+      method: "POST",
+      headers: { "X-CAP-API-KEY": cfg.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: cfg.identifier, password: cfg.password, encryptedPassword: false }),
+    });
+    if (res.status !== 429 || attempt >= RATE_LIMIT_RETRIES) break;
+    await sleep(rateLimitWaitMs * (attempt + 1));
+  }
   if (!res.ok) {
     const code = await readErrorCode(res);
     console.warn(`[capital] session creation failed: status=${res.status} code=${code}`);
@@ -148,15 +180,24 @@ async function getSession(forceNew = false): Promise<Session> {
 async function apiGet<T>(path: string): Promise<T> {
   assertAllowed("GET", path.split("?")[0]);
   const { apiKey, baseUrl } = config();
+  let throttled = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     const s = await getSession(attempt > 0);
-    const res = await rawFetch(baseUrl + path, {
-      method: "GET",
-      headers: { "X-CAP-API-KEY": apiKey, CST: s.cst, "X-SECURITY-TOKEN": s.securityToken },
-    });
+    const res = await withSlot(() =>
+      rawFetch(baseUrl + path, {
+        method: "GET",
+        headers: { "X-CAP-API-KEY": apiKey, CST: s.cst, "X-SECURITY-TOKEN": s.securityToken },
+      }),
+    );
     if (res.status === 401 && attempt === 0) {
       // Session expired: log in again once.
       session = null;
+      continue;
+    }
+    if (res.status === 429 && throttled < RATE_LIMIT_RETRIES) {
+      throttled++;
+      attempt--; // a throttled call does not use up the re-login attempt
+      await sleep(rateLimitWaitMs * throttled);
       continue;
     }
     if (res.ok) {
@@ -174,7 +215,7 @@ async function apiGet<T>(path: string): Promise<T> {
     }
     if (res.status >= 500) throw new CapitalError("UPSTREAM_UNREACHABLE", `Capital.com indisponible (${res.status}).`, 502);
     if (res.status === 401) throw new CapitalError("AUTH_FAILED", `Session Capital.com refusée (${code}).`, 502);
-    throw new CapitalError("UPSTREAM_ERROR", `Erreur Capital.com (${code}).`);
+    throw new CapitalError("UPSTREAM_ERROR", `Erreur Capital.com (${code}).`, 502, code);
   }
   throw new CapitalError("AUTH_FAILED", "Session Capital.com refusée après reconnexion.", 502);
 }
@@ -246,17 +287,26 @@ export function getCandles(epic: string, resolution: string, max = 1000, ttlMs =
 // --------------------------------------------------------------------------- long history (for the ML model)
 
 const HISTORY_PAGE = 1000; // the API returns at most 1000 candles per call
-const HISTORY_MAX_PAGES = 12;
-const HISTORY_MAX_EMPTY = 3; // consecutive empty windows (weekends, holidays) before giving up
+const HISTORY_MAX_PAGES = 40;
+const HISTORY_BUDGET_MS = 15_000; // paging stops after this long; what was read is kept for the next request
+const HISTORY_MAX_EMPTY_SEC = 10 * 86_400; // this much empty time in a row (weekends, holidays are shorter) means the history starts later
+const HISTORY_MIN_WINDOW = 60; // steps: below this a date range is not worth the calls
+const HISTORY_SMALL_PAGE = 10; // a page this small for a wide window: the API is ignoring the range (it defaults to 10 candles)
 const HISTORY_RETRY_MS = 10 * 60_000; // after a failure, do not hit the paging again for a while
 const histories = new Map<string, { candles: Candle[]; complete: boolean }>();
 let pagingFailedAt = 0;
+/** Widest date range (in candles) the API accepted, per resolution; shrinks when it answers "invalid.max.daterange" */
+const windowSteps = new Map<string, number>();
 
 /** "2024-03-01T09:30:00": the date format of the prices endpoint (UTC). */
 const apiDate = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 19);
 
-async function getPageBefore(epic: string, resolution: string, endSec: number, stepSec: number): Promise<Candle[]> {
-  const q = new URLSearchParams({ resolution, max: String(HISTORY_PAGE), from: apiDate(endSec - HISTORY_PAGE * stepSec), to: apiDate(endSec) });
+/**
+ * Candles from `endSec - windowSteps` to `endSec`. The date range is given instead of `max`: Capital.com refuses both
+ * together ("error.invalid.max.daterange").
+ */
+async function getPageBefore(epic: string, resolution: string, endSec: number, stepSec: number, windowSteps: number): Promise<Candle[]> {
+  const q = new URLSearchParams({ resolution, from: apiDate(endSec - windowSteps * stepSec), to: apiDate(endSec) });
   const data = await apiGet<{ prices?: RawPrice[] }>(`/api/v1/prices/${encodeURIComponent(epic)}?${q}`);
   return toCandles(data.prices ?? []);
 }
@@ -280,18 +330,38 @@ export function getHistory(epic: string, resolution: string, target: number, ttl
     for (const c of recent) merged.set(c.time, c);
     store.candles = [...merged.values()].sort((a, b) => a.time - b.time);
 
-    let empty = 0;
+    let emptySec = 0;
+    const startedAt = Date.now();
     const paging = !pagingFailedAt || Date.now() - pagingFailedAt > HISTORY_RETRY_MS;
     let end = (store.candles[0]?.time ?? Math.floor(Date.now() / 1000)) - 1;
     try {
-      for (let page = 0; paging && page < HISTORY_MAX_PAGES && !store.complete && store.candles.length < target; page++) {
-        const older = (await getPageBefore(epic, resolution, end, step)).filter((c) => c.time <= end);
+      for (let page = 0; paging && page < HISTORY_MAX_PAGES && Date.now() - startedAt < HISTORY_BUDGET_MS && !store.complete && store.candles.length < target; page++) {
+        const width = windowSteps.get(resolution) ?? HISTORY_PAGE;
+        let raw: Candle[];
+        try {
+          raw = await getPageBefore(epic, resolution, end, step, width);
+        } catch (err) {
+          // Range too wide for this API: halve it and try again, down to a minimum
+          if (err instanceof CapitalError && err.upstream?.includes("daterange") && width / 2 >= HISTORY_MIN_WINDOW) {
+            windowSteps.set(resolution, Math.floor(width / 2));
+            page--;
+            continue;
+          }
+          throw err;
+        }
+        if (raw.length > 0 && raw.length <= HISTORY_SMALL_PAGE && width > 10 * HISTORY_SMALL_PAGE) {
+          pagingFailedAt = Date.now();
+          console.warn("[capital] the prices endpoint ignores date ranges: keeping the latest 1000 candles");
+          break;
+        }
+        const older = raw.filter((c) => c.time <= end);
         if (older.length === 0) {
-          if (++empty >= HISTORY_MAX_EMPTY) store.complete = true;
-          end -= HISTORY_PAGE * step;
+          emptySec += width * step;
+          if (emptySec >= HISTORY_MAX_EMPTY_SEC) store.complete = true;
+          end -= width * step;
           continue;
         }
-        empty = 0;
+        emptySec = 0;
         store.candles = [...older, ...store.candles];
         end = older[0].time - 1;
       }
@@ -370,8 +440,12 @@ export async function getSentimentFor(epic: string, all: string[]): Promise<Sent
 
 /** Test helper */
 export function __resetCapitalState() {
+  rateLimitWaitMs = 1_100;
   histories.clear();
+  windowSteps.clear();
   pagingFailedAt = 0;
+  active = 0;
+  waiting.length = 0;
   sentimentFailedAt = 0;
   session = null;
   loginInFlight = null;
