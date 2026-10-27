@@ -27,6 +27,31 @@ export const modelFamily = (source: string | undefined): ModelFamily =>
 
 export const stepsFor = (s: Pick<SeriesRef, "resMinutes" | "horizon">) => Math.max(1, Math.round(s.horizon / s.resMinutes));
 
+// --------------------------------------------------------------------------- simulated trade
+
+/** The simulated trade of the journal: stop at 1.5 ATR, target at twice the stop (the risk calculator's defaults). */
+export const SIM_STOP_ATR = 1.5;
+export const SIM_RR = 2;
+
+/**
+ * Replays "enter at the close of candle i in the forecast's direction, leave at the stop, the target, or at candle j" on
+ * the candles that followed. A candle touching both is counted as a stop (conservative). Result in R (1 R = the stop).
+ */
+export function simulateEntry(e: JournalEntry, candles: Candle[], i: number, j: number): JournalEntry["sim"] | undefined {
+  if (e.direction === "flat" || !(e.atr && e.atr > 0)) return undefined;
+  const dir = e.direction === "up" ? 1 : -1;
+  const entry = candles[i].close;
+  const slDist = SIM_STOP_ATR * e.atr;
+  const stop = entry - dir * slDist;
+  const target = entry + dir * SIM_RR * slDist;
+  for (let k = i + 1; k <= j; k++) {
+    const c = candles[k];
+    if (dir === 1 ? c.low <= stop : c.high >= stop) return { r: -1, exit: "stop" };
+    if (dir === 1 ? c.high >= target : c.low <= target) return { r: SIM_RR, exit: "target" };
+  }
+  return { r: (dir * (candles[j].close - entry)) / slDist, exit: "time" };
+}
+
 // --------------------------------------------------------------------------- resolution
 
 /** Reads outcomes for pending entries from the candle history. Same index-based definition as the backtest. */
@@ -49,7 +74,8 @@ export function resolveEntries(entries: JournalEntry[], candles: Candle[]): { en
     // the outcome candle must be complete: another candle must exist after it
     if (j >= candles.length - 1) return e;
     changed = true;
-    return { ...e, ref: candles[i].close, prev: i > 0 ? candles[i - 1].close : candles[i].close, outcome: candles[j].close };
+    const sim = simulateEntry(e, candles, i, j);
+    return { ...e, ref: candles[i].close, prev: i > 0 ? candles[i - 1].close : candles[i].close, outcome: candles[j].close, ...(sim ? { sim } : {}) };
   });
   return { entries: out, changed };
 }
@@ -96,7 +122,7 @@ export async function recordForecast(
   now = Date.now(),
   sentimentLong?: number | null,
   news?: boolean,
-  readings?: { confluence?: JournalEntry["confluence"]; nearFib?: boolean },
+  readings?: { confluence?: JournalEntry["confluence"]; nearFib?: boolean; atr?: number; spreadBps?: number; regime?: JournalEntry["regime"] },
 ): Promise<boolean> {
   const last = candles.at(-1);
   const target = forecast.points.at(-1)?.value;
@@ -128,6 +154,9 @@ export async function recordForecast(
     ...(typeof news === "boolean" ? { news } : {}),
     ...(readings?.confluence ? { confluence: readings.confluence } : {}),
     ...(typeof readings?.nearFib === "boolean" ? { nearFib: readings.nearFib } : {}),
+    ...(readings?.atr && readings.atr > 0 ? { atr: readings.atr } : {}),
+    ...(typeof readings?.spreadBps === "number" && Number.isFinite(readings.spreadBps) && readings.spreadBps >= 0 ? { spreadBps: Math.round(readings.spreadBps * 100) / 100 } : {}),
+    ...(readings?.regime ? { regime: readings.regime } : {}),
   };
   let wrote: boolean;
   try {
@@ -175,7 +204,18 @@ export function crowdRelation(direction: "up" | "down" | "flat", longPct: number
   return direction === crowd ? "with" : "against";
 }
 
-export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) => number): JournalStats {
+/**
+ * Round-trip cost of one entry, in basis points of the price: the spread seen on the quote when the forecast was made
+ * (else the assumed one), plus the assumed overnight financing for forecasts that hold a position for a day or more.
+ */
+export function costBps(e: JournalEntry, spreadBps: (epic: string) => number, financingBps: (epic: string) => number): number {
+  const nights = e.resMinutes >= 1440 ? Math.max(1, Math.ceil(e.horizon / 1440)) : 0;
+  return (e.spreadBps ?? spreadBps(e.epic)) + financingBps(e.epic) * nights;
+}
+
+const CALIBRATION_EDGES = [0.5, 0.55, 0.6, 0.65, 1.0001] as const;
+
+export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) => number, financingBps: (epic: string) => number = () => 0): JournalStats {
   let pending = 0, expired = 0, flat = 0, hits = 0, upHits = 0, lastHits = 0, evaluated = 0;
   let gross = 0, net = 0;
   const crowd: Record<CrowdRelation, { hits: number; n: number }> = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
@@ -183,6 +223,10 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
   const byConfluence = { low: { hits: 0, n: 0 }, mid: { hits: 0, n: 0 }, high: { hits: 0, n: 0 } };
   const byFib = { near: { hits: 0, n: 0 }, away: { hits: 0, n: 0 } };
   const bySession = Object.fromEntries(SESSIONS.map((x) => [x.key, { hits: 0, n: 0, net: 0 }])) as Record<SessionKey, { hits: number; n: number; net: number }>;
+  const byVol = { calm: { hits: 0, n: 0 }, normal: { hits: 0, n: 0 }, wild: { hits: 0, n: 0 } };
+  const byTrend = { trend: { hits: 0, n: 0 }, range: { hits: 0, n: 0 } };
+  const calib = CALIBRATION_EDGES.slice(0, -1).map(() => ({ hits: 0, n: 0, conf: 0 }));
+  const strat = { n: 0, sum: 0, sum2: 0, target: 0, stop: 0, time: 0 };
   const curve: JournalStats["curve"] = [];
   let first: number | null = null;
 
@@ -226,6 +270,29 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
       g.n++;
       g.hits += (e.direction === "up") === up ? 1 : 0;
     }
+    if (e.regime) {
+      const a = byVol[e.regime.vol];
+      const b = byTrend[e.regime.trend];
+      for (const g of [a, b]) {
+        g.n++;
+        g.hits += (e.direction === "up") === up ? 1 : 0;
+      }
+    }
+    const bin = CALIBRATION_EDGES.findIndex((edge, k) => e.confidence >= edge && e.confidence < CALIBRATION_EDGES[k + 1]);
+    if (bin >= 0) {
+      calib[bin].n++;
+      calib[bin].conf += e.confidence;
+      calib[bin].hits += (e.direction === "up") === up ? 1 : 0;
+    }
+    const cost = costBps(e, spreadBps, financingBps) / 1e4;
+    if (e.sim && e.atr && e.atr > 0) {
+      const slDist = SIM_STOP_ATR * e.atr;
+      const netR = e.sim.r - (e.ref * cost) / slDist;
+      strat.n++;
+      strat.sum += netR;
+      strat.sum2 += netR * netR;
+      strat[e.sim.exit]++;
+    }
     if (e.resMinutes < 1440) {
       const hour = new Date(e.t * 1000).getUTCHours();
       const part = SESSIONS.find((x) => hour >= x.from && hour < x.to);
@@ -233,14 +300,14 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
         const g = bySession[part.key];
         g.n++;
         g.hits += (e.direction === "up") === up ? 1 : 0;
-        g.net += sign * (e.outcome / e.ref - 1) - spreadBps(e.epic) / 1e4;
+        g.net += sign * (e.outcome / e.ref - 1) - cost;
       }
     }
     upHits += up ? 1 : 0;
     lastHits += e.ref - e.prev >= 0 === up ? 1 : 0;
     const r = sign * (e.outcome / e.ref - 1);
     gross += r;
-    net += r - spreadBps(e.epic) / 1e4;
+    net += r - cost;
     curve.push({ t: e.t, v: net * 100 });
   }
   return {
@@ -256,6 +323,17 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     byConfluence: { low: hit(byConfluence.low.hits, byConfluence.low.n), mid: hit(byConfluence.mid.hits, byConfluence.mid.n), high: hit(byConfluence.high.hits, byConfluence.high.n) },
     byFib: { near: hit(byFib.near.hits, byFib.near.n), away: hit(byFib.away.hits, byFib.away.n) },
     byNews: { near: hit(byNews.near.hits, byNews.near.n), calm: hit(byNews.calm.hits, byNews.calm.n) },
+    byVol: { calm: hit(byVol.calm.hits, byVol.calm.n), normal: hit(byVol.normal.hits, byVol.normal.n), wild: hit(byVol.wild.hits, byVol.wild.n) },
+    byTrend: { trend: hit(byTrend.trend.hits, byTrend.trend.n), range: hit(byTrend.range.hits, byTrend.range.n) },
+    calibration: calib.map((c, k) => ({ from: CALIBRATION_EDGES[k], to: Math.min(1, CALIBRATION_EDGES[k + 1]), meanConfidence: c.n ? c.conf / c.n : null, hit: hit(c.hits, c.n) })),
+    strategy: {
+      trades: strat.n,
+      meanNetR: strat.n >= MIN_SAMPLES ? strat.sum / strat.n : null,
+      se: strat.n >= MIN_SAMPLES ? Math.sqrt(Math.max(0, strat.sum2 / strat.n - (strat.sum / strat.n) ** 2) / strat.n) : null,
+      target: strat.target,
+      stop: strat.stop,
+      time: strat.time,
+    },
     netReturnPct: net * 100,
     grossReturnPct: gross * 100,
     curve,

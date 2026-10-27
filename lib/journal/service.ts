@@ -1,12 +1,13 @@
 import "server-only";
-import { INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
-import { getCandles, getSentimentFor } from "@/lib/capital";
+import { financingBpsFor, INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
+import { getCandles, getMarketQuote, getSentimentFor } from "@/lib/capital";
+import { regimeOf } from "@/lib/regime";
 import { relevantEvents } from "@/lib/calendar";
 import { getCalendar } from "@/lib/calendar-source";
 import type { Candle, ForecastResponse } from "@/lib/types";
 import { averageTrueRange } from "@/lib/risk";
 import { fibRetracement, nearFibLevel, stampFor, technicalVotes } from "@/lib/indicators";
-import { signalFrom, type SignalStatus } from "@/lib/signal";
+import { signalFrom, type SignalContext, type SignalStatus } from "@/lib/signal";
 import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
 import { MODEL_FAMILIES, type CrowdFadeStats, type JournalEntry, type JournalStats, type ModelFamily } from "./types";
@@ -34,12 +35,32 @@ async function newsInWindow(series: SeriesRef, now: number): Promise<boolean | u
   }
 }
 
-/** Classic readings at the time of the forecast, so that the journal can tell whether agreement between them means anything. */
-function readingsAt(series: SeriesRef, candles: Candle[], forecast: ForecastResponse) {
+/** Spread on the broker's quote, in basis points of the price; undefined when the market gives none (closed, no quote). */
+async function observedSpreadBps(epic: string): Promise<number | undefined> {
+  try {
+    const q = await getMarketQuote(epic);
+    if (q.bid === null || q.offer === null || !(q.offer >= q.bid)) return undefined;
+    return ((q.offer - q.bid) / ((q.offer + q.bid) / 2)) * 1e4;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What the journal keeps about the moment of a forecast: classic readings (does their agreement mean anything?), the ATR the
+ * simulated stop and target are based on, the market state, and the real spread (instead of an assumed one).
+ */
+async function readingsAt(series: SeriesRef, candles: Candle[], forecast: ForecastResponse) {
   const last = candles.at(-1);
   if (!last || candles.length < 60) return undefined;
-  const confluence = stampFor(technicalVotes(candles, series.resMinutes), forecast.direction) ?? undefined;
-  return { confluence, nearFib: nearFibLevel(last.close, fibRetracement(candles), averageTrueRange(candles)) };
+  const atr = averageTrueRange(candles) ?? undefined;
+  return {
+    confluence: stampFor(technicalVotes(candles, series.resMinutes), forecast.direction) ?? undefined,
+    nearFib: nearFibLevel(last.close, fibRetracement(candles), atr ?? null),
+    atr,
+    regime: regimeOf(candles) ?? undefined,
+    spreadBps: series.resMinutes < 1440 ? await observedSpreadBps(series.epic) : undefined,
+  };
 }
 
 /** Never throws: the journal must not break a forecast. */
@@ -49,7 +70,7 @@ export async function recordSafe(series: SeriesRef, candles: Candle[], forecast:
   try {
     const sentiment = await getSentimentFor(series.epic, INSTRUMENTS.map((i) => i.epic));
     const now = Date.now();
-    await recordForecast(storage, series, candles, forecast, now, sentiment?.long, await newsInWindow(series, now), readingsAt(series, candles, forecast));
+    await recordForecast(storage, series, candles, forecast, now, sentiment?.long, await newsInWindow(series, now), await readingsAt(series, candles, forecast));
   } catch (err) {
     console.warn("[journal] record failed:", err instanceof Error ? err.message : "unknown");
   }
@@ -133,7 +154,7 @@ async function buildOverview(): Promise<JournalOverview> {
             label: RESOLUTION_LABELS[ref.resolution] ?? ref.resolution,
             horizon: ref.horizon,
             model: family,
-            stats: computeStats(part, spreadBpsFor),
+            stats: computeStats(part, spreadBpsFor, financingBpsFor),
           });
         }
       }
@@ -143,7 +164,7 @@ async function buildOverview(): Promise<JournalOverview> {
   const models: JournalOverview["models"] = {};
   for (const family of MODEL_FAMILIES) {
     const part = all.filter((e) => modelFamily(e.source) === family);
-    if (part.length) models[family] = computeStats(part, spreadBpsFor);
+    if (part.length) models[family] = computeStats(part, spreadBpsFor, financingBpsFor);
   }
   series.sort((a, b) => a.epic.localeCompare(b.epic) || a.horizon - b.horizon || a.model.localeCompare(b.model));
   const dayAgo = Date.now() - 24 * 3600_000;
@@ -156,9 +177,9 @@ async function buildOverview(): Promise<JournalOverview> {
 }
 
 /** Live status of one forecast series, for the model that produced the forecast being shown. */
-export async function signalFor(epic: string, resolution: string, horizon: number, source: string | undefined): Promise<SignalStatus> {
+export async function signalFor(epic: string, resolution: string, horizon: number, source: string | undefined, ctx: SignalContext = {}): Promise<SignalStatus> {
   const overview = await journalOverview();
   const family = modelFamily(source);
   const row = overview.series.find((s) => s.epic === epic && s.resolution === resolution && s.horizon === horizon && s.model === family);
-  return signalFrom(row?.stats);
+  return signalFrom(row?.stats, ctx);
 }

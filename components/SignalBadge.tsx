@@ -13,6 +13,15 @@ export default function SignalBadge({ status }: { status: SignalStatus }) {
         <span className={`verdict ${CLASS[status.level]}`}>{status.label}</span>
       </summary>
       <p className="muted small">{status.detail}</p>
+      {status.observed && (
+        <ul className="muted small observed">
+          {status.observed.map((o) => (
+            <li key={o.label}>
+              {o.label} : réussite observée {Math.round(o.hitRate * 100)} % ± {Math.round(o.margin * 100)} ({o.n} prévisions)
+            </li>
+          ))}
+        </ul>
+      )}
     </details>
   );
 }
