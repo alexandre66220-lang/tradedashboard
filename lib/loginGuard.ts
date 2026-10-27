@@ -12,6 +12,25 @@ export const MAX_LOCK_MS = 24 * 3600_000;
 const STRIKES_MS = 24 * 3600_000; // lock-outs within this period make the next one longer
 const KEY = "security/login-attempts.json";
 const MAX_RECORDS = 200;
+// The login must never wait for the store: a slow answer counts as "store down" and the in-memory counter takes over.
+const STORE_TIMEOUT_MS = 2500;
+const NOTIFY_TIMEOUT_MS = 4000;
+
+export function withTimeout<T>(p: Promise<T>, ms = STORE_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 
 export interface Attempt {
   /** Hash of the client address (the address itself is not stored) */
@@ -62,7 +81,7 @@ export function __resetLoginGuard() {
 
 async function readOne(id: string): Promise<Attempt | undefined> {
   try {
-    const list = await readList<Attempt>(KEY);
+    const list = await withTimeout(readList<Attempt>(KEY));
     if (list) return list.find((a) => a.id === id) ?? memory.get(id);
   } catch {
     /* store down: fall back to memory */
@@ -81,12 +100,14 @@ export async function recordFailure(ip: string, now = Date.now()): Promise<{ jus
   const id = await clientId(ip);
   let result = { justLocked: false };
   try {
-    await updateList<Attempt, void>(KEY, (items) => {
-      const { next, justLocked } = withFailure(items.find((a) => a.id === id), id, now);
-      result = { justLocked };
-      const others = items.filter((a) => a.id !== id && !stale(a, now));
-      return { items: [...others, next].slice(-MAX_RECORDS), result: undefined };
-    });
+    await withTimeout(
+      updateList<Attempt, void>(KEY, (items) => {
+        const { next, justLocked } = withFailure(items.find((a) => a.id === id), id, now);
+        result = { justLocked };
+        const others = items.filter((a) => a.id !== id && !stale(a, now));
+        return { items: [...others, next].slice(-MAX_RECORDS), result: undefined };
+      }),
+    );
   } catch (err) {
     if (!(err instanceof StoreError)) console.warn("[login] attempts store unavailable, counting in memory");
     const { next, justLocked } = withFailure(memory.get(id), id, now);
@@ -94,12 +115,15 @@ export async function recordFailure(ip: string, now = Date.now()): Promise<{ jus
     result = { justLocked };
   }
   if (result.justLocked && notifyConfigured()) {
-    await sendNotification({
-      title: "Connexion bloquée",
-      message: `${MAX_FAILURES} mots de passe erronés de suite sur votre dashboard : l'accès est bloqué pour ce visiteur. Si ce n'était pas vous, pensez à changer DASHBOARD_PASSWORD.`,
-      priority: 4,
-      tags: ["warning"],
-    }).catch(() => false);
+    await withTimeout(
+      sendNotification({
+        title: "Connexion bloquée",
+        message: `${MAX_FAILURES} mots de passe erronés de suite sur votre dashboard : l'accès est bloqué pour ce visiteur. Si ce n'était pas vous, pensez à changer DASHBOARD_PASSWORD.`,
+        priority: 4,
+        tags: ["warning"],
+      }),
+      NOTIFY_TIMEOUT_MS,
+    ).catch(() => false);
   }
   return result;
 }
@@ -109,10 +133,12 @@ export async function recordSuccess(ip: string, now = Date.now()): Promise<void>
   const id = await clientId(ip);
   memory.delete(id);
   try {
-    await updateList<Attempt, void>(KEY, (items) => ({
-      items: items.flatMap((a) => (a.id === id ? (a.strikes.length ? [{ ...a, fails: [], lockedUntil: 0 }] : []) : stale(a, now) ? [] : [a])),
-      result: undefined,
-    }));
+    await withTimeout(
+      updateList<Attempt, void>(KEY, (items) => ({
+        items: items.flatMap((a) => (a.id === id ? (a.strikes.length ? [{ ...a, fails: [], lockedUntil: 0 }] : []) : stale(a, now) ? [] : [a])),
+        result: undefined,
+      })),
+    );
   } catch {
     /* nothing to clear, or the store is down */
   }

@@ -12,12 +12,14 @@ export async function POST(req: Request) {
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return new NextResponse("Site verrouillé", { status: 503 });
 
+  // The body is read first: the form must not wait behind the store
+  const form = await req.formData().catch(() => null);
+  const submitted = form?.get("password");
+
   const ip = clientIp(req);
   // A locked-out client is refused before the password is even looked at: guessing is pointless while locked
   if ((await lockStatus(ip)).locked) return redirect(req, "/login?e=locked");
 
-  const form = await req.formData().catch(() => null);
-  const submitted = form?.get("password");
   if (typeof submitted !== "string" || !(await passwordMatches(submitted, password))) {
     const { justLocked } = await recordFailure(ip);
     await new Promise((r) => setTimeout(r, 600));

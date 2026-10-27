@@ -3,8 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const send = vi.fn(async (..._args: unknown[]) => true);
 vi.mock("@/lib/notify", () => ({ notifyConfigured: () => true, sendNotification: (...a: unknown[]) => send(...a) }));
 
+let storeHangs = false;
+vi.mock("@/lib/store", async (orig) => {
+  const real = await orig<typeof import("@/lib/store")>();
+  const hang = () => new Promise<never>(() => {});
+  return {
+    ...real,
+    readList: (...a: Parameters<typeof real.readList>) => (storeHangs ? hang() : real.readList(...a)),
+    updateList: (...a: Parameters<typeof real.updateList>) => (storeHangs ? hang() : real.updateList(...a)),
+  };
+});
+
 import { POST } from "@/app/api/login/route";
-import { BASE_LOCK_MS, clientIp, isLocked, lockStatus, MAX_FAILURES, MAX_LOCK_MS, recordFailure, recordSuccess, withFailure, WINDOW_MS, __resetLoginGuard } from "@/lib/loginGuard";
+import { BASE_LOCK_MS, clientIp, isLocked, lockStatus, MAX_FAILURES, MAX_LOCK_MS, recordFailure, recordSuccess, withFailure, withTimeout, WINDOW_MS, __resetLoginGuard } from "@/lib/loginGuard";
 import { __resetMemoryStorage } from "@/lib/journal/storage";
 
 const T = 1_700_000_000_000;
@@ -119,4 +130,32 @@ describe("login route", () => {
     expect(locked.headers.get("set-cookie")).toBeNull();
     expect((await attempt("right-password", "8.8.8.8")).headers.get("set-cookie")).toContain("HttpOnly"); // another visitor
   }, 20_000);
+});
+
+describe("a store that does not answer", () => {
+  beforeEach(() => {
+    vi.stubEnv("DASHBOARD_PASSWORD", "right-password");
+    vi.stubEnv("JOURNAL_STORAGE", "memory");
+    __resetMemoryStorage();
+    __resetLoginGuard();
+    storeHangs = true;
+  });
+  afterEach(() => {
+    storeHangs = false;
+    vi.unstubAllEnvs();
+  });
+
+  it("withTimeout gives up on a promise that never settles", async () => {
+    await expect(withTimeout(new Promise<never>(() => {}), 20)).rejects.toThrow("timeout");
+    await expect(withTimeout(Promise.resolve(3), 20)).resolves.toBe(3);
+  });
+
+  it("still lets the right password in instead of hanging", async () => {
+    const body = new FormData();
+    body.set("password", "right-password");
+    const res = await POST(new Request("https://dash.example.app/api/login", { method: "POST", body, headers: { "x-nf-client-connection-ip": "3.3.3.3" } }));
+    expect(res.status).toBe(303);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/");
+    expect(res.headers.get("set-cookie")).toContain("HttpOnly");
+  }, 15_000);
 });
