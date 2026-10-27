@@ -7,6 +7,7 @@ import { verdict } from "@/lib/verdict";
 import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
 import Disclaimer from "./Disclaimer";
+import { readJson, RETRY_AFTER_FAILURE_MS, unexpectedResponse } from "@/lib/readJson";
 
 const POLL_MS = 5 * 60_000;
 const MODEL_LABEL: Record<ModelFamily, string> = { ml2: "Modèle ML v2", ml: "Modèle ML v1", builtin: "Modèle intégré" };
@@ -132,6 +133,7 @@ export default function JournalPanel() {
   useEffect(() => {
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failed = false;
     const run = async () => {
       clearTimeout(timer);
       if (!document.hidden) {
@@ -141,15 +143,18 @@ export default function JournalPanel() {
             window.location.href = "/login";
             return;
           }
-          const body = (await res.json()) as JournalOverview | ApiError;
+          const body = await readJson<JournalOverview | ApiError>(res);
+          if (!body) throw unexpectedResponse(res);
           if (!res.ok || "error" in body) throw new Error("error" in body ? body.error.message : `Erreur ${res.status}`);
           setData(body);
           setError(null);
+          failed = false;
         } catch (e) {
+          failed = true;
           if (!ctrl.signal.aborted) setError((e as Error).message || "Serveur injoignable.");
         }
       }
-      if (!ctrl.signal.aborted) timer = setTimeout(run, POLL_MS);
+      if (!ctrl.signal.aborted) timer = setTimeout(run, failed ? RETRY_AFTER_FAILURE_MS : POLL_MS);
     };
     const onVisible = () => !document.hidden && run();
     run();
