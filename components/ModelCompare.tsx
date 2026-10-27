@@ -75,7 +75,7 @@ export default function ModelCompare({ query }: { query: string }) {
               ))}
             </tbody>
           </table>
-          <p className="muted small">
+          <p className="muted small explain">
             Même historique, même méthode pour chaque ligne (réentraînement régulier, sans données du futur). « Net / appel » : résultat moyen d’un
             pari après le spread, en points de base (1 pt = 0,01 % du prix). Attention : plus on compare de variantes, plus l’une d’elles paraît
             bonne par hasard. Une ligne n’est convaincante que si sa marge d’erreur exclut 50 % <em>et</em> que le net est positif ; sinon, ne

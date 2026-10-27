@@ -18,7 +18,7 @@ body {
 }
 button, select, input { font: inherit; color: inherit; }
 
-.wrap { max-width: 1280px; margin: 0 auto; padding: 10px 12px calc(84px + env(safe-area-inset-bottom)); }
+.wrap { max-width: 1280px; margin: 0 auto; padding: calc(10px + env(safe-area-inset-top)) 12px calc(84px + env(safe-area-inset-bottom)); }
 @media (min-width: 900px) { .wrap { padding-bottom: 24px; } }
 
 .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -70,7 +70,7 @@ button.ghost { background: none; border: 1px solid var(--border); border-radius:
 .stats dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .disclaimer { color: var(--muted); font-size: 11px; margin: 12px 0 0; border-top: 1px solid var(--border); padding-top: 8px; }
 
-.login { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+.login { min-height: 100dvh; display: grid; place-items: center; padding: calc(16px + env(safe-area-inset-top)) 16px 16px; }
 .login form { width: 100%; max-width: 320px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; display: grid; gap: 12px; }
 .login h1 { font-size: 18px; margin: 0; }
 .login input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 16px; }
@@ -277,3 +277,23 @@ code { overflow-wrap: anywhere; }
 .hdot.off { background: var(--border); }
 .panel-head .hdot { margin: 0; }
 .health > button { margin-top: 4px; }
+
+/* header actions, summary strip, compact view */
+.strip { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0 10px; }
+.strip .verdict { margin-top: 0; }
+.chip { font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #232733; white-space: nowrap; }
+.chip.muted { font-weight: 400; color: var(--muted); }
+.chip.dir.up { color: var(--up); background: rgba(38,166,154,.12); }
+.chip.dir.down { color: var(--down); background: rgba(239,83,80,.12); }
+.chip.dir.unproven { opacity: .6; }
+/* compact view: keep the figures, hide the long explanations (errors and empty states stay) */
+.compact .explain { display: none; }
+
+/* instrument comparison chart */
+.cmpchart { height: 190px; margin-top: 6px; }
+.legend { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.legend-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 4px 8px; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--text); cursor: pointer; text-align: left; }
+.legend-btn.on { border-color: var(--border); background: rgba(255,255,255,.03); }
+.legend-btn .lname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend-btn span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+.swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }

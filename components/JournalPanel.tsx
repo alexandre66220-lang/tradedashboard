@@ -100,7 +100,7 @@ function CrowdBlock({ crowd }: { crowd: CrowdFadeStats }) {
       <div className="jm-head">
         <strong>Aller contre la foule ?</strong>
       </div>
-      <p className="muted small">
+      <p className="muted small explain">
         Test indépendant du modèle : à chaque fenêtre, on parie à l’inverse du côté où se trouve la majorité des clients Capital.com, puis on juge
         sur le vrai prix à l’échéance. {crowd.judged} fenêtres jugées avec un sentiment enregistré.
       </p>
@@ -204,7 +204,7 @@ export default function JournalPanel() {
 
       {data?.configured && families.length > 0 && (
         <>
-          <p className="muted small">
+          <p className="muted small explain">
             Chaque prévision est enregistrée à l’avance, puis jugée sur le vrai prix à l’échéance : aucun recul possible.
             {since ? ` Suivi depuis le ${new Date(since).toLocaleDateString("fr-FR")}.` : ""}
           </p>

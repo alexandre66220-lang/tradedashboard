@@ -229,7 +229,7 @@ export default function TradesPanel(p: Props) {
               <button className="sl-apply" type="submit" disabled={busy}>
                 {busy ? "Enregistrement…" : "Enregistrer le trade"}
               </button>
-              <p className="muted small">
+              <p className="muted small explain">
                 La prévision affichée à ce moment-là est conservée avec le trade, pour comparer plus tard vos décisions et celles du modèle.
               </p>
             </form>

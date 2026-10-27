@@ -57,7 +57,7 @@ export default function AlertsPanel(p: Props) {
       {p.configured === false && <p className="muted small">Alertes non configurées : aucun stockage Blob n’est relié à ce projet.</p>}
       {p.error && <p className="rc-warn">{p.error}</p>}
 
-      <p className="muted small">
+      <p className="muted small explain">
         Vous êtes prévenu automatiquement : <strong>35 minutes avant une annonce majeure</strong>, quand <strong>le stop ou l’objectif d’un de vos trades
         ouverts est touché</strong> (notés dans « Mes trades »), et quand un <strong>prix que vous fixez ci-dessous</strong> est atteint.
       </p>

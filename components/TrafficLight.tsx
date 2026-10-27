@@ -25,7 +25,7 @@ export default function TrafficLight({ result, assumedSpreadBps }: { result: Lig
           Spread actuel : {result.spreadBps === null ? "inconnu" : `${result.spreadBps.toFixed(1)} points de base`} (supposé : {assumedSpreadBps}).
           {result.atrPercentile !== null && ` Volatilité : ${Math.round(result.atrPercentile * 100)}ᵉ centile de l’historique chargé.`}
         </p>
-        <p className="muted small">Ce feu n’empêche rien : il rappelle de vérifier avant de prendre une position.</p>
+        <p className="muted small explain">Ce feu n’empêche rien : il rappelle de vérifier avant de prendre une position.</p>
       </div>
     </details>
   );

@@ -43,7 +43,15 @@ async function guard(id: string, label: string, fn: () => Promise<Omit<HealthChe
     const out = await Promise.race([fn(), new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS)))]);
     return { id, label, ...out };
   } catch (err) {
-    const detail = err instanceof CapitalError ? err.message : err instanceof Error && err.message === "timeout" ? "Pas de réponse en 8 s." : "Vérification impossible.";
+    // Messages of our own code and of fetch ("fetch failed", "calendar feed returned 403"): no secret in them
+    const detail =
+      err instanceof CapitalError
+        ? err.message
+        : err instanceof Error && err.message === "timeout"
+          ? "Pas de réponse en 8 s."
+          : err instanceof Error && err.message
+            ? `Vérification impossible : ${err.message.slice(0, 120)}.`
+            : "Vérification impossible.";
     return { id, label, status: "error", detail };
   } finally {
     clearTimeout(timer);
