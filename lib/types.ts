@@ -101,8 +101,13 @@ export interface OutlookItem {
   horizons: Record<string, OutlookCell | { error: string }>;
 }
 
+/** Shown in a daily / weekly cell whose forecast is still being computed */
+export const OUTLOOK_PENDING = "Calcul en cours…";
+
 export interface OutlookResponse {
   items: OutlookItem[];
   source?: string;
   generatedAt: number;
+  /** Some forecasts are still being computed: ask again shortly */
+  pending?: boolean;
 }

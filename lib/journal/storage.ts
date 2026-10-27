@@ -127,6 +127,11 @@ function backend(): Backend | null {
 
 let memory: JournalStorage | null = null;
 
+/** Tests only: forget what the in-memory store holds. */
+export function __resetMemoryStorage() {
+  memory = null;
+}
+
 /** null when the journal is not configured (no store available). */
 export function getStorage(): JournalStorage | null {
   switch (backend()) {
