@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import type { JournalOverview } from "@/lib/journal/service";
-import { MODEL_FAMILIES, SESSIONS, type CrowdFadeGroup, type CrowdFadeStats, type JournalHit, type JournalStats, type ModelFamily } from "@/lib/journal/types";
+import { INSTRUMENTS } from "@/config/instruments";
+import { MODEL_FAMILIES, SESSIONS, type CrowdFadeGroup, type CrowdFadeStats, type JournalHit, type JournalStats, type ModelFamily, type ResultCurve } from "@/lib/journal/types";
 import { verdict } from "@/lib/verdict";
-import Curve from "./Curve";
+import ResultChart from "./ResultChart";
 import type { ApiError } from "@/lib/types";
 import Disclaimer from "./Disclaimer";
 import { readJson, RETRY_AFTER_FAILURE_MS, unexpectedResponse } from "@/lib/readJson";
@@ -122,7 +123,6 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
           Autour des annonces importantes : fenêtre avec annonce {fmtHit(st.byNews.near)} · sans annonce {fmtHit(st.byNews.calm)}.
         </p>
       )}
-      <Curve points={st.curve} label="Gains simulés cumulés" />
     </div>
   );
 }
@@ -179,6 +179,44 @@ function CrowdBlock({ crowd }: { crowd: CrowdFadeStats }) {
         </tbody>
       </table>
       </div>
+    </div>
+  );
+}
+
+/** Result curve of the judged forecasts, by model and by instrument. */
+function ResultSection({ curves, families }: { curves: ResultCurve[]; families: ModelFamily[] }) {
+  const [family, setFamily] = useState<ModelFamily | null>(null);
+  const [epic, setEpic] = useState<string | null>(null);
+  const model = family && families.includes(family) ? family : families[0];
+  const available = curves.filter((c) => c.model === model);
+  const curve = available.find((c) => c.epic === epic) ?? available.find((c) => c.epic === null);
+  if (!model || !curve) return null;
+  return (
+    <div className="jm">
+      <div className="jm-head">
+        <strong>Courbe de résultat</strong>
+      </div>
+      {families.length > 1 && (
+        <div className="overlays" role="group" aria-label="Modèle">
+          {families.map((f) => (
+            <button key={f} type="button" className={`chipbtn${f === model ? " on" : ""}`} aria-pressed={f === model} onClick={() => setFamily(f)}>
+              {MODEL_SHORT[f]}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="overlays" role="group" aria-label="Instrument">
+        {available.map((c) => (
+          <button key={c.epic ?? "all"} type="button" className={`chipbtn${c.epic === curve.epic ? " on" : ""}`} aria-pressed={c.epic === curve.epic} onClick={() => setEpic(c.epic)}>
+            {c.epic === null ? "Tous" : (INSTRUMENTS.find((i) => i.epic === c.epic)?.name.split(" (")[0] ?? c.epic)}
+          </button>
+        ))}
+      </div>
+      <ResultChart curve={curve} />
+      <p className="muted small explain">
+        Une unité misée sur chaque prévision haussière ou baissière, spread et frais de nuit déduits. Les pointillés montrent jusqu’où le hasard seul
+        pourrait porter le résultat (95 %) : tant que la courbe reste entre eux, le résultat n’est pas distinguable de la chance.
+      </p>
     </div>
   );
 }
@@ -256,6 +294,8 @@ export default function JournalPanel() {
           {families.map((f) => (
             <ModelBlock key={f} family={f} st={data.models[f]!} />
           ))}
+
+          {data.curves && data.curves.length > 0 && <ResultSection curves={data.curves} families={families} />}
 
           {data.crowd && data.crowd.judged > 0 && <CrowdBlock crowd={data.crowd} />}
 

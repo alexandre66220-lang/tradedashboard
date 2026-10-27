@@ -122,3 +122,19 @@ export interface CrowdFadeStats {
   /** 60-70 % or 30-40 % on one side */
   moderate: CrowdFadeGroup;
 }
+
+/** One point of a result curve: cumulative net result (%) and the half-width of the zone chance alone would stay in (%). */
+export interface CurvePoint {
+  t: number;
+  v: number;
+  b: number;
+}
+
+export interface ResultCurve {
+  model: ModelFamily;
+  /** null = all instruments */
+  epic: string | null;
+  /** Judged forecasts the curve is made of */
+  n: number;
+  points: CurvePoint[];
+}

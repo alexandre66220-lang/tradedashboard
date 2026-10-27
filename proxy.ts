@@ -4,7 +4,7 @@ import { isValidSession, SESSION_COOKIE } from "@/lib/auth";
 // The manifest and icons hold no data; the phone fetches them without the session cookie (home-screen install).
 const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/logout", "/manifest.webmanifest", "/icon.png", "/apple-icon.png"]);
 // Called by Vercel Cron without the dashboard cookie; the route itself requires `Bearer $CRON_SECRET` (fails closed).
-const CRON_PATHS = new Set(["/api/journal/record", "/api/alerts/check"]);
+const CRON_PATHS = new Set(["/api/journal/record", "/api/alerts/check", "/api/backup/run"]);
 
 export async function proxy(req: NextRequest) {
   const password = process.env.DASHBOARD_PASSWORD;

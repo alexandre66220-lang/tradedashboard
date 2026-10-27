@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import alerts, { config as alertsConfig } from "../netlify/functions/cron-alerts.mjs";
 import journal, { config as journalConfig } from "../netlify/functions/cron-journal.mjs";
 import daily, { config as dailyConfig } from "../netlify/functions/cron-journal-daily.mjs";
+import backup, { config as backupConfig } from "../netlify/functions/cron-backup.mjs";
 import record, { config as recordConfig } from "../netlify/functions/journal-record-background.mjs";
 
 const ctx = { site: { url: "https://dash.example.app" } };
@@ -23,6 +24,7 @@ describe("Netlify scheduled functions", () => {
     expect(alertsConfig.schedule).toBe("*/5 * * * *");
     expect(journalConfig.schedule).toBe("*/30 * * * *");
     expect(dailyConfig.schedule).toBe("5 7 * * *");
+    expect(backupConfig.schedule).toBe("30 3 * * *");
     expect(recordConfig.background).toBe(true);
   });
 
@@ -45,6 +47,15 @@ describe("Netlify scheduled functions", () => {
     fetchMock.mockClear();
     await daily(req(), ctx);
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toContain("?scope=daily");
+  });
+
+  it("ask for the nightly backup with the shared secret", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await backup(req(), ctx);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://dash.example.app/api/backup/run");
+    expect(init.headers).toMatchObject({ Authorization: "Bearer s3cret" });
   });
 
   it("do nothing without the secret, and never throw when the site is down", async () => {

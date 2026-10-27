@@ -20,6 +20,9 @@ vi.mock("@netlify/blobs", () => ({
         files.set(key, { value, version });
         return { modified: true, etag: `"${version}"` };
       },
+      async delete(key: string) {
+        files.delete(key);
+      },
       async list({ prefix }: { prefix?: string }) {
         return { blobs: [...files.keys()].filter((k) => !prefix || k.startsWith(prefix)).map((key) => ({ key, etag: "x" })) };
       },
@@ -55,6 +58,13 @@ describe("Netlify Blobs storage", () => {
     expect(await s.write("journal/a.json", [9], "stale", true)).toBe(true);
     expect((await s.read<number>("journal/a.json")).entries).toEqual([9]);
     expect(await s.list("journal/")).toEqual(["journal/a.json"]);
+  });
+
+  it("removes a file", async () => {
+    const s = netlifyStorage();
+    await s.write("backup/a.json", [1], null);
+    await s.remove("backup/a.json");
+    expect(await s.list("backup/")).toEqual([]);
   });
 
   it("opens one strongly consistent store, whose name can be changed", async () => {

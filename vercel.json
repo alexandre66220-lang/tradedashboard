@@ -5,6 +5,10 @@
     {
       "path": "/api/journal/record",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/backup/run",
+      "schedule": "30 3 * * *"
     }
   ]
 }
