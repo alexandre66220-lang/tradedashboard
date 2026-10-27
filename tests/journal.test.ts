@@ -150,4 +150,30 @@ describe("journal", () => {
     await recordForecast(s2, series, candles([100, 100, 100]), fc("up"), 1000, 55);
     expect("news" in (await s2.read(seriesKey(series))).entries[0]).toBe(false);
   });
+
+  it("splits hit rates by agreement of the technical readings and by Fibonacci proximity", () => {
+    const mk = (i: number, agree: number, nearFib: boolean | undefined, outcome: number) => ({
+      id: String(i), epic: "GOLD", resolution: "MINUTE_5", resMinutes: 5, horizon: 30, steps: 6, t: T0 + i * 1800, recordedAt: 1000 + i,
+      price: 100, direction: "up" as const, confidence: 0.6, target: 100, source: "ML v2", ref: 100, prev: 100, outcome,
+      confluence: { agree, against: 5 - agree, voting: 5 }, ...(nearFib === undefined ? {} : { nearFib }),
+    });
+    const entries = [
+      ...Array.from({ length: 20 }, (_, i) => mk(i, 5, true, 101)), // many agree, near a level: right
+      ...Array.from({ length: 20 }, (_, i) => mk(30 + i, 2, false, 99)), // some agree: wrong
+      ...Array.from({ length: 20 }, (_, i) => mk(60 + i, 0, false, 99)), // none agree: wrong
+      { ...mk(90, 3, undefined, 101), confluence: undefined }, // recorded before the readings existed
+    ];
+    const st = computeStats(entries, () => 0);
+    expect(st.byConfluence.high).toMatchObject({ hits: 20, samples: 20 });
+    expect(st.byConfluence.mid).toMatchObject({ hits: 0, samples: 20 });
+    expect(st.byConfluence.low).toMatchObject({ hits: 0, samples: 20 });
+    expect(st.byFib.near).toMatchObject({ hits: 20, samples: 20 });
+    expect(st.byFib.away).toMatchObject({ hits: 0, samples: 40 });
+  });
+
+  it("stores the readings with a forecast", async () => {
+    const s = memoryStorage();
+    await recordForecast(s, series, candles([100, 100, 100]), fc("up"), 1000, 55, true, { confluence: { agree: 4, against: 1, voting: 5 }, nearFib: true });
+    expect((await s.read(seriesKey(series))).entries[0]).toMatchObject({ confluence: { agree: 4, against: 1, voting: 5 }, nearFib: true });
+  });
 });

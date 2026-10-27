@@ -9,10 +9,12 @@ import {
   LineSeries,
   LineStyle,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { bollinger, ema, fibRetracement, rsi } from "@/lib/indicators";
 import type { Candle, ForecastResponse } from "@/lib/types";
 
 const COLORS = {
@@ -21,7 +23,16 @@ const COLORS = {
   flat: "#9598a1",
 };
 
+/** Reading aids drawn on the chart (display only: they are not part of the forecast). */
+export interface Overlays {
+  ma: boolean;
+  boll: boolean;
+  rsi: boolean;
+  fib: boolean;
+}
+
 interface Props {
+  overlays?: Overlays;
   candles: Candle[];
   forecast: ForecastResponse | null;
   showBand: boolean;
@@ -37,7 +48,19 @@ function formatTime(time: Time, withDate: boolean) {
   return withDate ? `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${hm}` : hm;
 }
 
-export default function PriceChart({ candles, forecast, showBand, viewKey }: Props) {
+const NO_OVERLAYS: Overlays = { ma: false, boll: false, rsi: false, fib: false };
+
+interface OverlayRefs {
+  ema20?: ISeriesApi<"Line">;
+  ema50?: ISeriesApi<"Line">;
+  bbU?: ISeriesApi<"Line">;
+  bbM?: ISeriesApi<"Line">;
+  bbL?: ISeriesApi<"Line">;
+  rsi?: ISeriesApi<"Line">;
+  fibLines: IPriceLine[];
+}
+
+export default function PriceChart({ candles, forecast, showBand, viewKey, overlays = NO_OVERLAYS }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<{
@@ -47,6 +70,7 @@ export default function PriceChart({ candles, forecast, showBand, viewKey }: Pro
     low: ISeriesApi<"Line">;
   } | null>(null);
   const fittedKey = useRef<string | null>(null);
+  const overlayRef = useRef<OverlayRefs>({ fibLines: [] });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -100,6 +124,7 @@ export default function PriceChart({ candles, forecast, showBand, viewKey }: Pro
       chartRef.current = null;
       seriesRef.current = null;
       fittedKey.current = null;
+      overlayRef.current = { fibLines: [] };
     };
   }, []);
 
@@ -129,6 +154,71 @@ export default function PriceChart({ candles, forecast, showBand, viewKey }: Pro
       chartRef.current?.timeScale().setVisibleLogicalRange({ from: Math.max(0, total - 120), to: total + 2 });
     }
   }, [candles, forecast, viewKey]);
+
+  // Reading aids: series are created when switched on and removed when switched off
+  useEffect(() => {
+    const chart = chartRef.current;
+    const s = seriesRef.current;
+    if (!chart || !s) return;
+    const o = overlayRef.current;
+    const line = (color: string, extra = {}) =>
+      chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra });
+    const drop = (k: "ema20" | "ema50" | "bbU" | "bbM" | "bbL" | "rsi") => {
+      const series = o[k];
+      if (series) chart.removeSeries(series);
+      o[k] = undefined;
+    };
+    const closes = candles.map((c) => c.close);
+    const points = <T,>(values: Array<T | null>, warm: number, pick: (v: T) => number) =>
+      candles.flatMap((c, i) => (i >= warm && values[i] !== null ? [{ time: t(c.time), value: pick(values[i] as T) }] : []));
+
+    if (overlays.ma) {
+      o.ema20 ??= line("#f0b90b");
+      o.ema50 ??= line("#29b6f6");
+      o.ema20.setData(points(ema(closes, 20), 19, (v) => v));
+      o.ema50.setData(points(ema(closes, 50), 49, (v) => v));
+    } else {
+      drop("ema20");
+      drop("ema50");
+    }
+
+    if (overlays.boll) {
+      o.bbU ??= line("rgba(171,71,188,0.7)");
+      o.bbL ??= line("rgba(171,71,188,0.7)");
+      o.bbM ??= line("rgba(171,71,188,0.35)", { lineStyle: LineStyle.Dotted });
+      const b = bollinger(closes);
+      o.bbU.setData(points(b, 19, (v) => v.upper));
+      o.bbL.setData(points(b, 19, (v) => v.lower));
+      o.bbM.setData(points(b, 19, (v) => v.mid));
+    } else {
+      drop("bbU");
+      drop("bbL");
+      drop("bbM");
+    }
+
+    if (overlays.rsi) {
+      if (!o.rsi) {
+        const r = chart.addSeries(LineSeries, { color: "#ab47bc", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "price", precision: 0, minMove: 1 } }, 1);
+        for (const price of [30, 70]) r.createPriceLine({ price, color: "rgba(149,152,161,0.5)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+        chart.panes()[1]?.setStretchFactor(0.3);
+        o.rsi = r;
+      }
+      o.rsi.setData(points(rsi(closes), 14, (v) => v));
+    } else {
+      drop("rsi");
+    }
+
+    for (const l of o.fibLines) s.candles.removePriceLine(l);
+    o.fibLines = [];
+    if (overlays.fib) {
+      const fib = fibRetracement(candles);
+      if (fib) {
+        o.fibLines = fib.levels.map((l) =>
+          s.candles.createPriceLine({ price: l.price, color: "rgba(240,185,11,0.55)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `${(l.ratio * 100).toFixed(1)} %` }),
+        );
+      }
+    }
+  }, [candles, overlays]);
 
   useEffect(() => {
     seriesRef.current?.high.applyOptions({ visible: showBand });

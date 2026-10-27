@@ -72,6 +72,17 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
           .
         </p>
       )}
+      {st.byConfluence.low.samples + st.byConfluence.mid.samples + st.byConfluence.high.samples > 0 && (
+        <p className="muted small">
+          Accord avec les indicateurs classiques (sur 5) : 0–1 accord {fmtHit(st.byConfluence.low)} · 2–3 accords {fmtHit(st.byConfluence.mid)} · 4–5 accords{" "}
+          {fmtHit(st.byConfluence.high)}.
+        </p>
+      )}
+      {st.byFib.near.samples + st.byFib.away.samples > 0 && (
+        <p className="muted small">
+          Prix sur un niveau de Fibonacci : oui {fmtHit(st.byFib.near)} · non {fmtHit(st.byFib.away)}.
+        </p>
+      )}
       {st.byNews.near.samples + st.byNews.calm.samples > 0 && (
         <p className="muted small">
           Autour des annonces importantes : fenêtre avec annonce {fmtHit(st.byNews.near)} · sans annonce {fmtHit(st.byNews.calm)}.

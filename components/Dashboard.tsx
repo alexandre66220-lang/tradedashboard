@@ -12,6 +12,7 @@ import { useCalendar } from "@/lib/useCalendar";
 import { useTrades } from "@/lib/useTrades";
 import type { ApiError, Candle, CandlesResponse, ForecastResponse } from "@/lib/types";
 import CompareChart from "./CompareChart";
+import ConfluencePanel from "./ConfluencePanel";
 import HealthPanel from "./HealthPanel";
 import StatusStrip from "./StatusStrip";
 import SignalBadge from "./SignalBadge";
@@ -29,6 +30,7 @@ import RiskCalculator from "./RiskCalculator";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
 import Disclaimer from "./Disclaimer";
 
+import type { Overlays } from "./PriceChart";
 const PriceChart = dynamic(() => import("./PriceChart"), { ssr: false });
 
 const POLL_MS = 5_000;
@@ -87,6 +89,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [resolution, setResolution] = useState<ResolutionKey>(DEFAULT_RESOLUTION);
   const [horizon, setHorizon] = useState(instrument.defaultHorizon);
   const [compact, setCompact] = useState(false);
+  const [overlays, setOverlays] = useState<Overlays>({ ma: false, boll: false, rsi: false, fib: false });
   const [showBand, setShowBand] = useState(true);
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
@@ -138,6 +141,12 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     setResolution(readPref("tf", DEFAULT_RESOLUTION, Object.keys(RESOLUTIONS)));
     setShowBand(readPref("band", "1", ["0", "1"]) === "1");
     setCompact(readPref<string>("compact", "0", ["0", "1"]) === "1");
+    setOverlays({
+      ma: readPref<string>("ov:ma", "0", ["0", "1"]) === "1",
+      boll: readPref<string>("ov:boll", "0", ["0", "1"]) === "1",
+      rsi: readPref<string>("ov:rsi", "0", ["0", "1"]) === "1",
+      fib: readPref<string>("ov:fib", "0", ["0", "1"]) === "1",
+    });
     const e = readPref("epic", instruments[0].epic, instruments.map((i) => i.epic));
     setEpic(e);
     const h = Number(readPref("h:" + e, "", HORIZON_CHOICES.map(String)));
@@ -363,10 +372,34 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
         <div className="alert info">Marché fermé (week-end ou hors séance) : les dernières bougies disponibles sont affichées.</div>
       )}
 
+      <div className="overlays" role="group" aria-label="Aides de lecture sur le graphique">
+        {(
+          [
+            ["ma", "Moyennes"],
+            ["boll", "Bollinger"],
+            ["rsi", "RSI"],
+            ["fib", "Fibonacci"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={`chipbtn${overlays[key] ? " on" : ""}`}
+            aria-pressed={overlays[key]}
+            onClick={() => {
+              setOverlays({ ...overlays, [key]: !overlays[key] });
+              writePref(`ov:${key}`, overlays[key] ? "0" : "1");
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="layout">
         <div className="chart-box">
           {loading && candles.length === 0 && !error && <div className="overlay">Chargement…</div>}
-          <PriceChart candles={candles} forecast={forecast} showBand={showBand} viewKey={`${epic}|${resolution}|${horizon}`} />
+          <PriceChart candles={candles} forecast={forecast} showBand={showBand} overlays={overlays} viewKey={`${epic}|${resolution}|${horizon}`} />
         </div>
 
 
@@ -424,6 +457,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             de directions correctes sur l’historique chargé ; ce n’est ni une garantie ni un conseil d’investissement.
           </Disclaimer>
           </section>
+          <ConfluencePanel candles={candles} resMinutes={RESOLUTIONS[resolution].minutes} direction={forecast?.direction} />
           <OutlookPanel
             selected={epic}
             onSelect={(e) => {

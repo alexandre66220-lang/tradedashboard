@@ -89,6 +89,12 @@ Dans le journal, les prévisions du modèle v2 sont comptées à part (« Modèl
 - **Résumé sous le prix** (prévision, signal, verdict du backtest), **graphique des instruments sur 24 h** (variation en %), **vue compacte** (case « Compact » : masque les textes d'explication, mémorisée sur l'appareil).
 - **Installation sur l'écran d'accueil** : `app/manifest.ts` et les icônes `app/icon.png` / `app/apple-icon.png` (publiques : le téléphone les lit sans session, elles ne contiennent aucune donnée). Sur iPhone : Safari → Partager → « Sur l'écran d'accueil ». Pas de mode hors ligne : les données sont en direct.
 
+### Aides de lecture, accord des indicateurs et Fibonacci
+
+- **Aides sur le graphique** (boutons au-dessus du graphique, mémorisés sur l'appareil) : moyennes mobiles 20 / 50, bandes de Bollinger, RSI (volet séparé) et niveaux de **Fibonacci** (retracements 23,6 / 38,2 / 50 / 61,8 / 78,6 % de la dernière jambe, calculés sur les 100 dernières bougies : le résultat dépend de cette fenêtre, c'est une aide de lecture, pas une mesure). Rien de tout cela n'entre dans la prévision.
+- **Accord des indicateurs** (`lib/indicators.ts`, panneau de l'onglet Prévision) : cinq lectures simples (moyennes, RSI, MACD, cassure des 20 dernières bougies, tendance sur l'unité de temps supérieure, obtenue en regroupant les bougies) votent hausse / baisse / neutre. Elles sont toutes calculées à partir des mêmes prix : leur accord n'est pas cinq avis indépendants.
+- **Mesure plutôt que croyance** : à chaque prévision, le journal enregistre combien de lectures allaient dans le même sens (de 0 à 5) et si le prix était sur un niveau de Fibonacci (à 0,15 ATR près). L'onglet Journal montre ensuite la réussite par niveau d'accord (0–1, 2–3, 4–5) et selon la proximité d'un niveau, avec marge d'erreur. S'il n'y a pas d'écart net, l'accord ne vaut rien de plus que le hasard.
+
 ### Journal des prévisions en direct
 
 Sur le plan gratuit de Vercel, les opérations de stockage sont comptées : le journal garde en mémoire la liste de ses fichiers (15 min) et son résumé (2 min), et le navigateur ne les redemande que toutes les 5 min. La prévision est redemandée une fois par minute (le prix, toutes les 5 secondes).

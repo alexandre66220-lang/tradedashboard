@@ -297,3 +297,13 @@ code { overflow-wrap: anywhere; }
 .legend-btn .lname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-btn span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
 .swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+
+/* reading aids on the chart, and the agreement panel */
+.overlays { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.chipbtn { min-height: 34px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--muted); cursor: pointer; font-size: 13px; }
+.chipbtn.on { color: var(--text); border-color: var(--accent); background: rgba(41,98,255,.15); }
+.confl-sum { margin: 6px 0; }
+.votes { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.votes li { display: flex; gap: 10px; align-items: flex-start; }
+.votes p { margin: 2px 0 0; }
+.mark { flex: none; width: 22px; text-align: center; font-weight: 700; }

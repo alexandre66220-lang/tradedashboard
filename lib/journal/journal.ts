@@ -96,6 +96,7 @@ export async function recordForecast(
   now = Date.now(),
   sentimentLong?: number | null,
   news?: boolean,
+  readings?: { confluence?: JournalEntry["confluence"]; nearFib?: boolean },
 ): Promise<boolean> {
   const last = candles.at(-1);
   const target = forecast.points.at(-1)?.value;
@@ -125,6 +126,8 @@ export async function recordForecast(
     source: forecast.source ?? "intégré",
     ...(typeof sentimentLong === "number" && Number.isFinite(sentimentLong) ? { sentiment: Math.round(sentimentLong * 10) / 10 } : {}),
     ...(typeof news === "boolean" ? { news } : {}),
+    ...(readings?.confluence ? { confluence: readings.confluence } : {}),
+    ...(typeof readings?.nearFib === "boolean" ? { nearFib: readings.nearFib } : {}),
   };
   let wrote: boolean;
   try {
@@ -177,6 +180,8 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
   let gross = 0, net = 0;
   const crowd: Record<CrowdRelation, { hits: number; n: number }> = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
   const byNews = { near: { hits: 0, n: 0 }, calm: { hits: 0, n: 0 } };
+  const byConfluence = { low: { hits: 0, n: 0 }, mid: { hits: 0, n: 0 }, high: { hits: 0, n: 0 } };
+  const byFib = { near: { hits: 0, n: 0 }, away: { hits: 0, n: 0 } };
   const bySession = Object.fromEntries(SESSIONS.map((x) => [x.key, { hits: 0, n: 0, net: 0 }])) as Record<SessionKey, { hits: number; n: number; net: number }>;
   const curve: JournalStats["curve"] = [];
   let first: number | null = null;
@@ -203,6 +208,16 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     hits += (e.direction === "up") === up ? 1 : 0;
     if (e.sentiment !== undefined) {
       const g = crowd[crowdRelation(e.direction, e.sentiment)];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+    }
+    if (e.confluence) {
+      const g = byConfluence[e.confluence.agree >= 4 ? "high" : e.confluence.agree >= 2 ? "mid" : "low"];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+    }
+    if (e.nearFib !== undefined) {
+      const g = byFib[e.nearFib ? "near" : "away"];
       g.n++;
       g.hits += (e.direction === "up") === up ? 1 : 0;
     }
@@ -238,6 +253,8 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     baselines: { alwaysUp: hit(upHits, evaluated), lastMove: hit(lastHits, evaluated) },
     bySentiment: { with: hit(crowd.with.hits, crowd.with.n), against: hit(crowd.against.hits, crowd.against.n), neutral: hit(crowd.neutral.hits, crowd.neutral.n) },
     bySession: Object.fromEntries(SESSIONS.map((x) => [x.key, { hit: hit(bySession[x.key].hits, bySession[x.key].n), netReturnPct: bySession[x.key].net * 100 }])) as JournalStats["bySession"],
+    byConfluence: { low: hit(byConfluence.low.hits, byConfluence.low.n), mid: hit(byConfluence.mid.hits, byConfluence.mid.n), high: hit(byConfluence.high.hits, byConfluence.high.n) },
+    byFib: { near: hit(byFib.near.hits, byFib.near.n), away: hit(byFib.away.hits, byFib.away.n) },
     byNews: { near: hit(byNews.near.hits, byNews.near.n), calm: hit(byNews.calm.hits, byNews.calm.n) },
     netReturnPct: net * 100,
     grossReturnPct: gross * 100,
