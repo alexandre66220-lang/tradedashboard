@@ -287,6 +287,7 @@ export function getCandles(epic: string, resolution: string, max = 1000, ttlMs =
 // --------------------------------------------------------------------------- long history (for the ML model)
 
 const HISTORY_PAGE = 1000; // the API returns at most 1000 candles per call
+const HISTORY_WINDOW = 950; // steps per date range: both ends are inclusive and the range has to stay under `max`
 const HISTORY_MAX_PAGES = 40;
 const HISTORY_BUDGET_MS = 15_000; // paging stops after this long; what was read is kept for the next request
 const HISTORY_MAX_EMPTY_SEC = 10 * 86_400; // this much empty time in a row (weekends, holidays are shorter) means the history starts later
@@ -302,11 +303,12 @@ const windowSteps = new Map<string, number>();
 const apiDate = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 19);
 
 /**
- * Candles from `endSec - windowSteps` to `endSec`. The date range is given instead of `max`: Capital.com refuses both
- * together ("error.invalid.max.daterange").
+ * Candles from `endSec - windowSteps` to `endSec`. Both ends of the range are inclusive and `max` defaults to 10: the
+ * range must hold fewer points than `max` (else "error.invalid.max.daterange"), so `max` is set to the limit and the
+ * range kept a little under it.
  */
 async function getPageBefore(epic: string, resolution: string, endSec: number, stepSec: number, windowSteps: number): Promise<Candle[]> {
-  const q = new URLSearchParams({ resolution, from: apiDate(endSec - windowSteps * stepSec), to: apiDate(endSec) });
+  const q = new URLSearchParams({ resolution, max: String(HISTORY_PAGE), from: apiDate(endSec - windowSteps * stepSec), to: apiDate(endSec) });
   const data = await apiGet<{ prices?: RawPrice[] }>(`/api/v1/prices/${encodeURIComponent(epic)}?${q}`);
   return toCandles(data.prices ?? []);
 }
@@ -336,13 +338,14 @@ export function getHistory(epic: string, resolution: string, target: number, ttl
     let end = (store.candles[0]?.time ?? Math.floor(Date.now() / 1000)) - 1;
     try {
       for (let page = 0; paging && page < HISTORY_MAX_PAGES && Date.now() - startedAt < HISTORY_BUDGET_MS && !store.complete && store.candles.length < target; page++) {
-        const width = windowSteps.get(resolution) ?? HISTORY_PAGE;
+        const width = windowSteps.get(resolution) ?? HISTORY_WINDOW;
         let raw: Candle[];
         try {
           raw = await getPageBefore(epic, resolution, end, step, width);
         } catch (err) {
           // Range too wide for this API: halve it and try again, down to a minimum
           if (err instanceof CapitalError && err.upstream?.includes("daterange") && width / 2 >= HISTORY_MIN_WINDOW) {
+            console.warn(`[capital] date range of ${width} candles (${resolution}) refused: trying ${Math.floor(width / 2)}`);
             windowSteps.set(resolution, Math.floor(width / 2));
             page--;
             continue;
@@ -351,7 +354,7 @@ export function getHistory(epic: string, resolution: string, target: number, ttl
         }
         if (raw.length > 0 && raw.length <= HISTORY_SMALL_PAGE && width > 10 * HISTORY_SMALL_PAGE) {
           pagingFailedAt = Date.now();
-          console.warn("[capital] the prices endpoint ignores date ranges: keeping the latest 1000 candles");
+          console.warn(`[capital] date range of ${width} candles (${resolution}) returned only ${raw.length} candles: keeping the latest 1000`);
           break;
         }
         const older = raw.filter((c) => c.time <= end);
