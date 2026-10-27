@@ -4,6 +4,8 @@ import { getCandles, getSentimentFor } from "@/lib/capital";
 import { relevantEvents } from "@/lib/calendar";
 import { getCalendar } from "@/lib/calendar-source";
 import type { Candle, ForecastResponse } from "@/lib/types";
+import { averageTrueRange } from "@/lib/risk";
+import { fibRetracement, nearFibLevel, stampFor, technicalVotes } from "@/lib/indicators";
 import { signalFrom, type SignalStatus } from "@/lib/signal";
 import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
@@ -32,6 +34,14 @@ async function newsInWindow(series: SeriesRef, now: number): Promise<boolean | u
   }
 }
 
+/** Classic readings at the time of the forecast, so that the journal can tell whether agreement between them means anything. */
+function readingsAt(series: SeriesRef, candles: Candle[], forecast: ForecastResponse) {
+  const last = candles.at(-1);
+  if (!last || candles.length < 60) return undefined;
+  const confluence = stampFor(technicalVotes(candles, series.resMinutes), forecast.direction) ?? undefined;
+  return { confluence, nearFib: nearFibLevel(last.close, fibRetracement(candles), averageTrueRange(candles)) };
+}
+
 /** Never throws: the journal must not break a forecast. */
 export async function recordSafe(series: SeriesRef, candles: Candle[], forecast: ForecastResponse): Promise<void> {
   const storage = getStorage();
@@ -39,7 +49,7 @@ export async function recordSafe(series: SeriesRef, candles: Candle[], forecast:
   try {
     const sentiment = await getSentimentFor(series.epic, INSTRUMENTS.map((i) => i.epic));
     const now = Date.now();
-    await recordForecast(storage, series, candles, forecast, now, sentiment?.long, await newsInWindow(series, now));
+    await recordForecast(storage, series, candles, forecast, now, sentiment?.long, await newsInWindow(series, now), readingsAt(series, candles, forecast));
   } catch (err) {
     console.warn("[journal] record failed:", err instanceof Error ? err.message : "unknown");
   }

@@ -23,6 +23,10 @@ export interface JournalEntry {
   sentiment?: number;
   /** A high-impact announcement for the instrument fell inside the window (intraday series only; unknown for older entries) */
   news?: boolean;
+  /** How many classic technical readings agreed with the forecast (not recorded for neutral forecasts / older entries) */
+  confluence?: { agree: number; against: number; voting: number };
+  /** The price was sitting on a Fibonacci retracement level (within 0.15 ATR) when the forecast was made */
+  nearFib?: boolean;
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -67,6 +71,10 @@ export interface JournalStats {
   bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
   /** Hit rate and net result by moment of the day (UTC hour of the forecast), intraday series only */
   bySession: Record<SessionKey, { hit: JournalHit; netReturnPct: number }>;
+  /** Hit rate by number of technical readings agreeing with the forecast: 0-1, 2-3, 4-5 */
+  byConfluence: { low: JournalHit; mid: JournalHit; high: JournalHit };
+  /** Hit rate depending on whether the price sat on a Fibonacci retracement level */
+  byFib: { near: JournalHit; away: JournalHit };
   /** Hit rate depending on whether a high-impact announcement fell inside the forecast window */
   byNews: { near: JournalHit; calm: JournalHit };
   /** Net simulated return in %, one unit of notional per call, after the assumed spread */
