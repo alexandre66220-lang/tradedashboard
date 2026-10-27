@@ -1,6 +1,7 @@
 import "server-only";
 import type { ForecastResponse } from "../types";
 import { builtinProvider } from "./builtin";
+import { enrichRequest } from "./enrich";
 import { externalProvider } from "./external";
 import type { ForecastProvider, ForecastRequest } from "./types";
 
@@ -44,7 +45,7 @@ export async function runForecast(req: ForecastRequest): Promise<ForecastRespons
   if (hit) return hit.value;
 
   const entry: Entry = { expires: now + ttlFor(req), value: Promise.resolve(null as never) };
-  entry.value = provider.forecast(req).catch(async (err) => {
+  entry.value = enrichRequest(req).then((r) => provider.forecast(r)).catch(async (err) => {
     console.warn("[forecast] external service failed, using built-in model:", err instanceof Error ? err.message : "unknown");
     entry.expires = Date.now() + FAILURE_TTL_MS;
     const fallback = await builtinProvider.forecast(req);

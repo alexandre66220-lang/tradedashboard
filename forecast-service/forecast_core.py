@@ -15,6 +15,7 @@ Honesty notes:
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, replace
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
@@ -22,7 +23,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-SOURCE = "ML, gradient boosting + logistique"
+SOURCE = "ML v2, gradient boosting + logistique"
 
 WARMUP = 60  # candles needed before features are valid
 MIN_TRAIN = 250  # samples before the first backtest prediction
@@ -34,6 +35,21 @@ Z = 1.28  # ~80 % band
 VOL_WINDOW = 96
 CONF_THRESHOLDS = (0.55, 0.60, 0.65, 0.70)
 MIN_SAMPLES = 20
+CROSS_LAGS = (1, 3, 8, 21)  # k-step returns of the other instruments
+CROSS_MAX_GAP = 3  # a context candle older than this many steps is considered missing (feature = 0)
+VOLUME_MIN_SHARE = 0.8  # share of candles with a positive volume needed to use the volume features
+
+
+@dataclass(frozen=True)
+class Config:
+    """Which information the model sees, and how flexible it is."""
+
+    volume: bool = True
+    cross: bool = True
+    cost: bool = True
+    depth: int = 3
+    iters: int = 120
+    leaf: int = 30
 
 
 class InsufficientData(ValueError):
@@ -74,7 +90,7 @@ def _ema(x: np.ndarray, span: int) -> np.ndarray:
 
 
 def build_features(t: np.ndarray, o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray, res_minutes: int) -> np.ndarray:
-    """Feature matrix [n, f]; row i only uses candles up to and including i. NaN where undefined."""
+    """Price-only feature matrix [n, f]; row i only uses candles up to and including i. NaN where undefined."""
     n = len(c)
     lc = np.log(c)
     lr1 = np.zeros(n)
@@ -126,20 +142,71 @@ def build_features(t: np.ndarray, o: np.ndarray, h: np.ndarray, l: np.ndarray, c
     return X
 
 
+def volume_features(v: np.ndarray | None) -> np.ndarray | None:
+    """Volume relative to its recent norm. None when the broker gave no usable volume."""
+    if v is None or len(v) == 0:
+        return None
+    v = np.asarray(v, dtype=float)
+    if not np.isfinite(v).all() or (v > 0).mean() < VOLUME_MIN_SHARE:
+        return None
+    lv = np.log1p(np.maximum(v, 0.0))
+    m5, m20 = _rolling_mean(lv, 5), _rolling_mean(lv, 20)
+    return np.column_stack([lv - m20, m5 - m20])
+
+
+def cross_features(t: np.ndarray, res_minutes: int, context: list[dict] | None) -> np.ndarray | None:
+    """
+    Recent returns of the other instruments, each in units of its own noise. A context candle is matched
+    to the latest one that started at or before the candle being scored, so nothing from the future leaks.
+    Missing or stale context counts as 0 (no information).
+    """
+    cols: list[np.ndarray] = []
+    max_gap = CROSS_MAX_GAP * res_minutes * 60
+    for ctx in context or []:
+        ct = np.asarray(ctx["time"], dtype=float)
+        cc = np.asarray(ctx["close"], dtype=float)
+        if len(ct) < 100 or len(ct) != len(cc):
+            continue
+        lc = np.log(cc)
+        lr = np.zeros(len(cc))
+        lr[1:] = np.diff(lc)
+        scale = _rolling_std(lr, 20)
+        scale = np.where(scale > 0, scale, np.nan)
+        idx = np.searchsorted(ct, t, side="right") - 1
+        fresh = (idx >= 0) & (t - ct[np.clip(idx, 0, None)] <= max_gap)
+        for k in CROSS_LAGS:
+            z = np.full(len(cc), np.nan)
+            z[k:] = (lc[k:] - lc[:-k]) / (scale[k:] * math.sqrt(k))
+            col = np.where(fresh, z[np.clip(idx, 0, None)], 0.0)
+            cols.append(np.nan_to_num(col, nan=0.0, posinf=0.0, neginf=0.0))
+    return np.column_stack(cols) if cols else None
+
+
+def assemble(base: np.ndarray, vol: np.ndarray | None, cross: np.ndarray | None, cfg: Config) -> np.ndarray:
+    parts = [base]
+    if cfg.volume and vol is not None:
+        parts.append(vol)
+    if cfg.cross and cross is not None:
+        parts.append(cross)
+    X = np.column_stack(parts)
+    X[:WARMUP] = np.nan
+    return X
+
+
 # --------------------------------------------------------------------------- model
 
 
-def fit_predict(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray) -> np.ndarray:
-    """P(up) for each row of X_test: average of a shallow gradient-boosted forest and a ridge logistic model."""
+def fit_predict(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, cfg: Config = Config()) -> np.ndarray:
+    """P(y = 1) for each row of X_test: average of a shallow gradient-boosted forest and a ridge logistic model."""
     if len(X_test) == 0:
         return np.empty(0)
     if y_train.min() == y_train.max():
         return np.full(len(X_test), 0.5)
     gbm = HistGradientBoostingClassifier(
-        max_depth=3,
+        max_depth=cfg.depth,
         learning_rate=0.05,
-        max_iter=120,
-        min_samples_leaf=30,
+        max_iter=cfg.iters,
+        min_samples_leaf=cfg.leaf,
         l2_regularization=1.0,
         early_stopping=False,
         random_state=0,
@@ -170,8 +237,47 @@ def hit_stat(hits: int, samples: int, steps: int = 1) -> dict:
     return {"hitRate": hits / samples, "samples": samples, "margin": min(0.5, 1.96 * 0.5 / math.sqrt(effective))}
 
 
-def walk_forward(X: np.ndarray, c: np.ndarray, steps: int) -> dict:
+def predict(X_train: np.ndarray, fwd_train: np.ndarray, X_test: np.ndarray, cfg: Config, theta: float) -> tuple[np.ndarray, np.ndarray, float]:
+    """
+    Returns (p_dir, p_big, base_big) for each test row.
+    - p_dir: probability that the move is up, given that it is a real one.
+    - p_big: probability that the move beats the trading cost `theta` (in either direction); 1 without cost.
+    - base_big: how often that happened in the training data (a call is made only when p_big reaches it).
+    Without the cost target (theta = 0) this is the plain "up or down" classifier.
+    """
+    if cfg.cost and theta > 0:
+        heads = []
+        for y in ((fwd_train > theta), (fwd_train < -theta)):
+            y = y.astype(int)
+            if y.max() == 0:
+                heads.append(np.zeros(len(X_test)))
+            elif y.min() == 1:
+                heads.append(np.ones(len(X_test)))
+            else:
+                heads.append(fit_predict(X_train, y, X_test, cfg))
+        pu, pd = heads
+        total = pu + pd
+        p_dir = np.where(total > 1e-9, pu / np.maximum(total, 1e-9), 0.5)
+        return p_dir, total, float(np.mean(np.abs(fwd_train) > theta))
+    p = fit_predict(X_train, (fwd_train > 0).astype(int), X_test, cfg)
+    return p, np.ones(len(p)), 0.0
+
+
+def is_call(p_dir: np.ndarray, p_big: np.ndarray, base_big: float) -> np.ndarray:
+    """A call is made when the direction is clear enough and the move is likely to beat the cost."""
+    return (np.abs(p_dir - 0.5) >= DEADBAND) & (p_big >= base_big)
+
+
+def walk_forward(
+    X: np.ndarray,
+    c: np.ndarray,
+    steps: int,
+    cfg: Config = Config(),
+    spread_bps: float = 0.0,
+    max_fits: int = MAX_FITS,
+) -> dict:
     n = len(c)
+    theta = spread_bps / 1e4
     fwd, valid, labelled = _labels(c, steps, X)
     last_t = n - 1 - steps
     cum = np.cumsum(labelled)
@@ -179,6 +285,8 @@ def walk_forward(X: np.ndarray, c: np.ndarray, steps: int) -> dict:
         **hit_stat(0, 0, steps),
         "baselines": {"alwaysUp": hit_stat(0, 0, steps), "lastMove": hit_stat(0, 0, steps)},
         "byConfidence": [{"minConfidence": t, **hit_stat(0, 0, steps)} for t in CONF_THRESHOLDS],
+        "avgNetBps": None,
+        "coverage": None,
     }
     if last_t < 1 or not (cum >= MIN_TRAIN).any():
         return empty
@@ -187,23 +295,26 @@ def walk_forward(X: np.ndarray, c: np.ndarray, steps: int) -> dict:
         return empty
 
     n_test = last_t - t_start + 1
-    block = max(MIN_RETRAIN_EVERY, math.ceil(n_test / MAX_FITS))
+    block = max(MIN_RETRAIN_EVERY, math.ceil(n_test / max_fits))
     ps: list[float] = []
     ts: list[int] = []
+    called: list[bool] = []
     for b in range(t_start, last_t + 1, block):
         # Only samples whose outcome was already known at time b: index j with j + steps <= b
         train = np.where(labelled[: b - steps + 1])[0]
         test = np.array([t for t in range(b, min(b + block, last_t + 1)) if valid[t]], dtype=int)
         if len(train) < MIN_TRAIN or len(test) == 0:
             continue
-        p = fit_predict(X[train], (fwd[train] > 0).astype(int), X[test])
-        ps.extend(p.tolist())
+        p_dir, p_big, base_big = predict(X[train], fwd[train], X[test], cfg, theta)
+        ps.extend(p_dir.tolist())
+        called.extend(is_call(p_dir, p_big, base_big).tolist())
         ts.extend(test.tolist())
 
     hits = samples = up_hits = last_hits = 0
     conf = [[0, 0] for _ in CONF_THRESHOLDS]
-    for p, t in zip(ps, ts):
-        if abs(p - 0.5) < DEADBAND:
+    nets: list[float] = []
+    for p, t, made in zip(ps, ts, called):
+        if not made:
             continue
         actual = c[t + steps] - c[t]
         if actual == 0:
@@ -214,6 +325,7 @@ def walk_forward(X: np.ndarray, c: np.ndarray, steps: int) -> dict:
         hits += hit
         up_hits += went_up
         last_hits += (c[t] - c[t - 1] >= 0) == went_up
+        nets.append((1 if p > 0.5 else -1) * (c[t + steps] / c[t] - 1) - theta)
         confidence = max(p, 1 - p)
         for k, thr in enumerate(CONF_THRESHOLDS):
             if confidence >= thr:
@@ -223,19 +335,57 @@ def walk_forward(X: np.ndarray, c: np.ndarray, steps: int) -> dict:
         **hit_stat(hits, samples, steps),
         "baselines": {"alwaysUp": hit_stat(up_hits, samples, steps), "lastMove": hit_stat(last_hits, samples, steps)},
         "byConfidence": [{"minConfidence": thr, **hit_stat(h_, s_, steps)} for thr, (h_, s_) in zip(CONF_THRESHOLDS, conf)],
+        # mean result of one call after the spread, in basis points of the price; None below MIN_SAMPLES
+        "avgNetBps": float(np.mean(nets) * 1e4) if len(nets) >= MIN_SAMPLES else None,
+        # share of the tested candles on which the model made a call (the rest: "neutral")
+        "coverage": float(sum(called) / len(called)) if called else None,
     }
 
 
 # --------------------------------------------------------------------------- forecast
 
 
-def ml_forecast(candles: list[dict], res_minutes: int, horizon: int) -> dict:
+def prepare(candles: list[dict], res_minutes: int, context: list[dict] | None) -> dict:
     t = np.array([k["time"] for k in candles], dtype=float)
     o, h, l, c = (np.array([k[f] for k in candles], dtype=float) for f in ("open", "high", "low", "close"))
+    vols = [k.get("volume") for k in candles]
+    v = np.array(vols, dtype=float) if all(isinstance(x, (int, float)) for x in vols) else None
+    return {
+        "t": t,
+        "c": c,
+        "base": build_features(t, o, h, l, c, res_minutes),
+        "vol": volume_features(v),
+        "cross": cross_features(t, res_minutes, context),
+    }
+
+
+def feature_names(prep: dict, cfg: Config, spread_bps: float) -> list[str]:
+    names = ["prix"]
+    if cfg.volume and prep["vol"] is not None:
+        names.append("volume")
+    if cfg.cross and prep["cross"] is not None:
+        names.append("autres instruments")
+    if cfg.cost and spread_bps > 0:
+        names.append("coût du spread")
+    return names
+
+
+def ml_forecast(
+    candles: list[dict],
+    res_minutes: int,
+    horizon: int,
+    context: list[dict] | None = None,
+    spread_bps: float | None = None,
+    cfg: Config = Config(),
+) -> dict:
+    spread = float(spread_bps or 0.0)
+    prep = prepare(candles, res_minutes, context)
+    t, c = prep["t"], prep["c"]
     n = len(c)
     steps = max(1, round(horizon / res_minutes))
+    theta = spread / 1e4
 
-    X = build_features(t, o, h, l, c, res_minutes)
+    X = assemble(prep["base"], prep["vol"], prep["cross"], cfg)
     fwd, valid, labelled = _labels(c, steps, X)
     train = np.where(labelled)[0]
     if len(train) < MIN_LIVE_TRAIN:
@@ -243,11 +393,9 @@ def ml_forecast(candles: list[dict], res_minutes: int, horizon: int) -> dict:
     if not valid[n - 1]:
         raise InsufficientData("latest candle has no valid features (flat market?)")
 
-    p_up = float(fit_predict(X[train], (fwd[train] > 0).astype(int), X[n - 1 : n])[0])
-    if abs(p_up - 0.5) < DEADBAND:
-        direction = "flat"
-    else:
-        direction = "up" if p_up > 0.5 else "down"
+    p_dir, p_big, base_big = predict(X[train], fwd[train], X[n - 1 : n], cfg, theta)
+    p_up = float(p_dir[0])
+    direction = "flat" if not is_call(p_dir, p_big, base_big)[0] else ("up" if p_up > 0.5 else "down")
 
     total = (2 * p_up - 1) * float(np.mean(np.abs(fwd[train])))
     lr1 = np.diff(np.log(c))[-VOL_WINDOW:]
@@ -257,17 +405,17 @@ def ml_forecast(candles: list[dict], res_minutes: int, horizon: int) -> dict:
     points = []
     for k in range(1, steps + 1):
         mu = total * k / steps
-        spread = Z * sigma * math.sqrt(k)
+        spread_k = Z * sigma * math.sqrt(k)
         points.append(
             {
                 "time": int(t[-1] + k * step_sec),
                 "value": float(last * math.exp(mu)),
-                "low": float(last * math.exp(mu - spread)),
-                "high": float(last * math.exp(mu + spread)),
+                "low": float(last * math.exp(mu - spread_k)),
+                "high": float(last * math.exp(mu + spread_k)),
             }
         )
 
-    bt = walk_forward(X, c, steps)
+    bt = walk_forward(X, c, steps, cfg, spread)
     return {
         "points": points,
         "direction": direction,
@@ -276,4 +424,52 @@ def ml_forecast(candles: list[dict], res_minutes: int, horizon: int) -> dict:
         "backtestSamples": bt["samples"],
         "backtest": bt,
         "source": SOURCE,
+        "features": feature_names(prep, cfg, spread),
     }
+
+
+# --------------------------------------------------------------------------- what does each addition bring?
+
+COMPARE_FITS = 6  # lighter backtests: this runs on request, six models in a row
+
+VARIANTS: tuple[tuple[str, Config], ...] = (
+    ("Prix seul (version 1)", Config(volume=False, cross=False, cost=False)),
+    ("+ volume", Config(volume=True, cross=False, cost=False)),
+    ("+ autres instruments", Config(volume=True, cross=True, cost=False)),
+    ("+ coût du spread (version 2)", Config(volume=True, cross=True, cost=True)),
+    ("Version 2, plus prudente", Config(depth=2, iters=80, leaf=60)),
+    ("Version 2, plus souple", Config(depth=4, iters=200, leaf=20)),
+)
+
+
+def compare_variants(candles: list[dict], res_minutes: int, horizon: int, context: list[dict] | None = None, spread_bps: float | None = None) -> list[dict]:
+    """
+    Same walk-forward backtest for several versions of the model, to see which addition really helps.
+    Variants whose extra information is not available are left out; the result is only as good as
+    the number of samples: always read the margin before concluding.
+    """
+    spread = float(spread_bps or 0.0)
+    prep = prepare(candles, res_minutes, context)
+    steps = max(1, round(horizon / res_minutes))
+    rows, seen = [], set()
+    for name, cfg in VARIANTS:
+        names = feature_names(prep, cfg, spread)
+        key = (tuple(names), cfg.depth, cfg.iters, cfg.leaf)
+        if key in seen:
+            continue
+        seen.add(key)
+        X = assemble(prep["base"], prep["vol"], prep["cross"], cfg)
+        bt = walk_forward(X, prep["c"], steps, cfg, spread, COMPARE_FITS)
+        rows.append(
+            {
+                "name": name,
+                "features": names,
+                "hitRate": bt["hitRate"],
+                "samples": bt["samples"],
+                "margin": bt["margin"],
+                "avgNetBps": bt["avgNetBps"],
+                "coverage": bt["coverage"],
+                "live": cfg == Config(),
+            }
+        )
+    return rows

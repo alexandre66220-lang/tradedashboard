@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { __resetJournalCache, computeCrowdFade, computeStats, parseSeriesKey, recordForecast, resolveEntries, resolveSeries, seriesKey, type SeriesRef } from "@/lib/journal/journal";
+import { __resetJournalCache, computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveEntries, resolveSeries, seriesKey, type SeriesRef } from "@/lib/journal/journal";
 import { memoryStorage } from "@/lib/journal/storage";
 import type { Candle } from "@/lib/types";
 
@@ -114,5 +114,40 @@ describe("journal", () => {
     expect(c.extreme.grossReturnPct).toBeCloseTo(35 - 5, 5);
     expect(c.extreme.netReturnPct).toBeCloseTo(30 - 40 * 0.1, 5);
     expect(c.moderate.fade).toMatchObject({ hits: 0, samples: 3, hitRate: null });
+  });
+
+  it("keeps the model versions apart", () => {
+    expect(modelFamily("ML v2, gradient boosting + logistique")).toBe("ml2");
+    expect(modelFamily("ML, gradient boosting + logistique")).toBe("ml");
+    expect(modelFamily("intégré")).toBe("builtin");
+    expect(modelFamily("intégré — service externe indisponible")).toBe("builtin");
+    expect(modelFamily(undefined)).toBe("builtin");
+  });
+
+  it("splits hit rates by whether an announcement fell inside the window", () => {
+    const mk = (i: number, news: boolean | undefined, outcome: number) => ({
+      id: String(i), epic: "GOLD", resolution: "MINUTE_5", resMinutes: 5, horizon: 30, steps: 6, t: T0 + i * 1800, recordedAt: 1000 + i,
+      price: 100, direction: "up" as const, confidence: 0.6, target: 100, source: "ML", ref: 100, prev: 100, outcome, ...(news === undefined ? {} : { news }),
+    });
+    const entries = [
+      ...Array.from({ length: 20 }, (_, i) => mk(i, true, 99)), // announcement: wrong
+      ...Array.from({ length: 20 }, (_, i) => mk(30 + i, false, 101)), // calm: right
+      mk(60, undefined, 101), // recorded before the flag existed
+    ];
+    const st = computeStats(entries, () => 0);
+    expect(st.byNews.near).toMatchObject({ hits: 0, samples: 20 });
+    expect(st.byNews.calm).toMatchObject({ hits: 20, samples: 20 });
+    expect(st.byNews.calm.hitRate).toBe(1);
+  });
+
+  it("stores the announcement flag only when it is known", async () => {
+    const s = memoryStorage();
+    await recordForecast(s, series, candles([100, 100, 100]), fc("up"), 1000, 55, true);
+    const stored = (await s.read(seriesKey(series))).entries[0];
+    expect(stored).toMatchObject({ news: true, sentiment: 55 });
+    __resetJournalCache();
+    const s2 = memoryStorage();
+    await recordForecast(s2, series, candles([100, 100, 100]), fc("up"), 1000, 55);
+    expect("news" in (await s2.read(seriesKey(series))).entries[0]).toBe(false);
   });
 });

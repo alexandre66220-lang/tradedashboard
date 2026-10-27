@@ -21,6 +21,8 @@ export interface JournalEntry {
   source: string;
   /** % of Capital.com clients long when the forecast was made (not available for older entries) */
   sentiment?: number;
+  /** A high-impact announcement for the instrument fell inside the window (intraday series only; unknown for older entries) */
+  news?: boolean;
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -31,7 +33,9 @@ export interface JournalEntry {
   expired?: boolean;
 }
 
-export type ModelFamily = "ml" | "builtin";
+/** ml2 = ML with volume / other instruments / cost target (source "ML v2…"), ml = the first ML version, builtin = regression in the app */
+export const MODEL_FAMILIES = ["ml2", "ml", "builtin"] as const;
+export type ModelFamily = (typeof MODEL_FAMILIES)[number];
 
 export interface JournalHit {
   hits: number;
@@ -53,6 +57,8 @@ export interface JournalStats {
   baselines: { alwaysUp: JournalHit; lastMove: JournalHit };
   /** Hit rate depending on whether the forecast agreed with the crowd (>= 60 % on one side) */
   bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
+  /** Hit rate depending on whether a high-impact announcement fell inside the forecast window */
+  byNews: { near: JournalHit; calm: JournalHit };
   /** Net simulated return in %, one unit of notional per call, after the assumed spread */
   netReturnPct: number;
   grossReturnPct: number;
