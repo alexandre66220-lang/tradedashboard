@@ -142,7 +142,7 @@ export function netlifyStorage(): JournalStorage {
 type Backend = "netlify" | "vercel" | "memory";
 
 /** Which store to use: STORAGE_BACKEND if set, else Netlify when running there, else Vercel Blob when a token exists. */
-function backend(): Backend | null {
+export function backend(): Backend | null {
   const forced = process.env.STORAGE_BACKEND;
   if (forced === "netlify" || forced === "vercel" || forced === "memory") return forced;
   if (process.env.NETLIFY_BLOBS_CONTEXT || (globalThis as { netlifyBlobsContext?: unknown }).netlifyBlobsContext) return "netlify";
@@ -171,4 +171,39 @@ export function getStorage(): JournalStorage | null {
     default:
       return null;
   }
+}
+
+/**
+ * What the health panel shows when Netlify Blobs does not answer: which pieces of the runtime context exist (names only,
+ * never values) and whether a read works with each consistency mode, with the time it took.
+ */
+export async function netlifyDiagnostics(): Promise<{ context: string; eventual: string; strong: string; strongOk: boolean; eventualOk: boolean }> {
+  const g = (globalThis as { netlifyBlobsContext?: unknown }).netlifyBlobsContext;
+  let context = "absent";
+  try {
+    const raw = typeof g === "string" ? g : process.env.NETLIFY_BLOBS_CONTEXT;
+    if (raw) {
+      const parsed = typeof g === "object" && g ? (g as Record<string, unknown>) : JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+      context = `${g ? "global" : "env"}: ${["edgeURL", "uncachedEdgeURL", "apiURL", "siteID", "token"].map((k) => `${k}${parsed[k] ? "✓" : "✗"}`).join(" ")}`;
+    }
+  } catch {
+    context = "présent mais illisible";
+  }
+  const probe = async (consistency: "eventual" | "strong") => {
+    const t = Date.now();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("pas de réponse en 4 s")), 4000);
+        getStore({ name: process.env.NETLIFY_BLOBS_STORE || "tradedashboard", consistency })
+          .get("health/ping", { consistency })
+          .then(() => (clearTimeout(timer), resolve()), (e) => (clearTimeout(timer), reject(e)));
+      });
+      return { ok: true, text: `ok (${Date.now() - t} ms)` };
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : "erreur";
+      return { ok: false, text: `échec (${msg.slice(0, 140)})` };
+    }
+  };
+  const [e, st] = await Promise.all([probe("eventual"), probe("strong")]);
+  return { context, eventual: e.text, strong: st.text, eventualOk: e.ok, strongOk: st.ok };
 }
