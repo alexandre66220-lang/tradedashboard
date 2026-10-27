@@ -30,6 +30,9 @@ vi.mock("@vercel/blob", async () => {
       return {};
     }),
     list: vi.fn(async () => ({ blobs: [...store.keys()].map((pathname) => ({ pathname })), hasMore: false })),
+    del: vi.fn(async (key: string) => {
+      store.delete(key);
+    }),
   };
 });
 
@@ -80,6 +83,14 @@ describe("blob storage", () => {
     await expect(s.read("a.json")).rejects.toThrow(/could not be read/);
   });
 
+  it("removes a file, and does not mind one that is already gone", async () => {
+    const s = blobStorage();
+    await s.write("a.json", [1], null);
+    await s.remove("a.json");
+    expect(store.has("a.json")).toBe(false);
+    await expect(s.remove("a.json")).resolves.toBeUndefined();
+  });
+
   it("can force an overwrite", async () => {
     const s = blobStorage();
     await s.write("a.json", [{ n: 1 }], null);
@@ -111,6 +122,9 @@ describe("journal under persistent conflicts", () => {
       async list() {
         return [...files.keys()];
       },
+      async remove(key: string) {
+        files.delete(key);
+      },
     };
     return st as unknown as JournalStorage & { forced: number };
   }
@@ -139,6 +153,7 @@ describe("journal under persistent conflicts", () => {
       async list() {
         return [];
       },
+      async remove() {},
     };
     await expect(recordForecast(broken, series, candles, forecast, 1000)).rejects.toThrow("store down");
     const first = calls.n;

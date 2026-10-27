@@ -1,5 +1,6 @@
 import "server-only";
 import { INSTRUMENTS } from "@/config/instruments";
+import { lastBackup } from "@/lib/backup";
 import { CapitalError, capitalEnv, getMarketQuote } from "@/lib/capital";
 import { getCalendar } from "@/lib/calendar-source";
 import { journalOverview } from "@/lib/journal/service";
@@ -95,6 +96,19 @@ const checkJournal = () =>
     return { status: "ok", detail: base };
   });
 
+const BACKUP_STALE_MS = 36 * 3600_000;
+
+const checkBackup = () =>
+  guard("backup", "Sauvegarde du journal", async () => {
+    if (!getStorage()) return { status: "off", detail: "Pas de stockage : rien à sauvegarder." };
+    const b = await lastBackup();
+    if (!b) return { status: "warn", detail: "Aucune sauvegarde pour l'instant (la première est faite chaque nuit vers 3 h 30 UTC). Vous pouvez en télécharger une à la main ci-dessous." };
+    const age = Date.now() - b.at;
+    return age > BACKUP_STALE_MS
+      ? { status: "warn", detail: `Dernière sauvegarde du ${new Date(b.at).toLocaleDateString("fr-FR")} : la tâche quotidienne ne semble pas tourner.` }
+      : { status: "ok", detail: `Dernière sauvegarde du ${new Date(b.at).toLocaleDateString("fr-FR")} (14 jours conservés).` };
+  });
+
 const checkCalendar = () =>
   guard("calendar", "Calendrier des annonces", async () => {
     const c = await getCalendar();
@@ -117,7 +131,7 @@ const checkSettings = () =>
 const ORDER: Record<HealthStatus, number> = { off: 0, ok: 1, warn: 2, error: 3 };
 
 export async function healthReport(): Promise<HealthReport> {
-  const checks = await Promise.all([checkCapital(), checkModel(), checkStorage(), checkJournal(), checkCalendar(), checkSettings()]);
+  const checks = await Promise.all([checkCapital(), checkModel(), checkStorage(), checkJournal(), checkBackup(), checkCalendar(), checkSettings()]);
   const worst = checks.reduce<HealthStatus>((w, c) => (ORDER[c.status] > ORDER[w] ? c.status : w), "ok");
   return { generatedAt: Date.now(), overall: worst === "off" ? "ok" : worst, checks };
 }

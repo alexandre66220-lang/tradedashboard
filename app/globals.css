@@ -309,3 +309,7 @@ code { overflow-wrap: anywhere; }
 .mark { flex: none; width: 22px; text-align: center; font-weight: 700; }
 
 .observed { margin: 4px 0 0; padding-left: 18px; }
+
+.backup { margin-top: 10px; }
+.backup summary { cursor: pointer; color: var(--muted); font-size: 12px; min-height: 40px; display: flex; align-items: center; }
+.linkbtn { display: inline-flex; align-items: center; margin: 4px 8px 4px 0; text-decoration: none; cursor: pointer; min-height: 38px; }

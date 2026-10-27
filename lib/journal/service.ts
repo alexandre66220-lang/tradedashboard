@@ -8,9 +8,9 @@ import type { Candle, ForecastResponse } from "@/lib/types";
 import { averageTrueRange } from "@/lib/risk";
 import { fibRetracement, nearFibLevel, stampFor, technicalVotes } from "@/lib/indicators";
 import { signalFrom, type SignalContext, type SignalStatus } from "@/lib/signal";
-import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
+import { buildCurve, computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
-import { MODEL_FAMILIES, type CrowdFadeStats, type JournalEntry, type JournalStats, type ModelFamily } from "./types";
+import { MODEL_FAMILIES, type CrowdFadeStats, type JournalEntry, type JournalStats, type ModelFamily, type ResultCurve } from "./types";
 
 export const RESOLUTION_LABELS: Record<string, string> = {
   MINUTE: "1 min",
@@ -82,6 +82,8 @@ export interface JournalOverview {
   /** Recording activity, to tell whether the journal is filling up */
   activity?: { lastRecordedAt: number | null; last24h: number; total: number };
   models: Partial<Record<ModelFamily, JournalStats>>;
+  /** Result curves per model and per instrument (and for all instruments) */
+  curves?: ResultCurve[];
   /** "Go against the crowd" test, over every recorded window */
   crowd: CrowdFadeStats | null;
   series: Array<{ epic: string; name: string; resolution: string; label: string; horizon: number; model: ModelFamily; stats: JournalStats }>;
@@ -173,7 +175,15 @@ async function buildOverview(): Promise<JournalOverview> {
     last24h: all.filter((e) => e.recordedAt >= dayAgo).length,
     total: all.length,
   };
-  return { configured: true, generatedAt: Date.now(), activity, models, crowd: computeCrowdFade(all, spreadBpsFor), series };
+  const curves: ResultCurve[] = [];
+  for (const family of MODEL_FAMILIES) {
+    const part = all.filter((e) => modelFamily(e.source) === family);
+    for (const epic of [null, ...INSTRUMENTS.map((i) => i.epic)]) {
+      const c = buildCurve(epic === null ? part : part.filter((e) => e.epic === epic), spreadBpsFor, financingBpsFor);
+      if (c.n > 0) curves.push({ model: family, epic, n: c.n, points: c.points });
+    }
+  }
+  return { configured: true, generatedAt: Date.now(), activity, models, curves, crowd: computeCrowdFade(all, spreadBpsFor), series };
 }
 
 /** Live status of one forecast series, for the model that produced the forecast being shown. */

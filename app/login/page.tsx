@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 const MESSAGES: Record<string, string> = {
   "1": "Mot de passe incorrect.",
-  locked: "Trop de tentatives. Réessayez dans quelques minutes.",
+  locked: "Trop de tentatives. Accès bloqué pendant au moins 15 minutes.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ e?: string }> }) {

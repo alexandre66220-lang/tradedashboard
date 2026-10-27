@@ -1,6 +1,6 @@
 import type { Candle, ForecastResponse } from "../types";
 import type { JournalStorage } from "./storage";
-import { SESSIONS, type CrowdFadeGroup, type SessionKey, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
+import { SESSIONS, type CurvePoint, type CrowdFadeGroup, type SessionKey, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
 
 const MAX_ENTRIES_PER_SERIES = 1500;
 const MIN_SAMPLES = 20;
@@ -211,6 +211,36 @@ export function crowdRelation(direction: "up" | "down" | "flat", longPct: number
 export function costBps(e: JournalEntry, spreadBps: (epic: string) => number, financingBps: (epic: string) => number): number {
   const nights = e.resMinutes >= 1440 ? Math.max(1, Math.ceil(e.horizon / 1440)) : 0;
   return (e.spreadBps ?? spreadBps(e.epic)) + financingBps(e.epic) * nights;
+}
+
+const CURVE_MAX_POINTS = 150;
+
+/**
+ * Cumulative net result of the judged forecasts (one unit per forecast, after costs), with the zone that chance alone
+ * would keep it in: if the forecasts had no edge, the sum of n results of spread s drifts as s * sqrt(n), so a curve
+ * that leaves ±1.96 s sqrt(n) is unlikely to be luck. (The mean of the results is assumed to be zero under chance.)
+ */
+export function buildCurve(entries: JournalEntry[], spreadBps: (epic: string) => number, financingBps: (epic: string) => number): { n: number; points: CurvePoint[] } {
+  const rs: Array<{ t: number; r: number }> = [];
+  for (const e of [...entries].sort((a, b) => a.t - b.t)) {
+    if (e.expired || e.outcome === undefined || e.ref === undefined || e.direction === "flat" || e.outcome === e.ref) continue;
+    const sign = e.direction === "up" ? 1 : -1;
+    rs.push({ t: e.t, r: (sign * (e.outcome / e.ref - 1) - costBps(e, spreadBps, financingBps) / 1e4) * 100 });
+  }
+  const n = rs.length;
+  if (n === 0) return { n, points: [] };
+  const mean = rs.reduce((a, x) => a + x.r, 0) / n;
+  const sd = Math.sqrt(rs.reduce((a, x) => a + (x.r - mean) ** 2, 0) / Math.max(1, n - 1));
+  let cum = 0;
+  let lastT = 0;
+  const all = rs.map((x, k) => {
+    cum += x.r;
+    lastT = Math.max(x.t, lastT + 1); // strictly increasing times, as the chart needs
+    return { t: lastT, v: cum, b: 1.96 * sd * Math.sqrt(k + 1) };
+  });
+  if (all.length <= CURVE_MAX_POINTS) return { n, points: all };
+  const step = (all.length - 1) / (CURVE_MAX_POINTS - 1);
+  return { n, points: Array.from({ length: CURVE_MAX_POINTS }, (_, k) => all[Math.round(k * step)]) };
 }
 
 const CALIBRATION_EDGES = [0.5, 0.55, 0.6, 0.65, 1.0001] as const;

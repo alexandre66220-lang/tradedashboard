@@ -16,11 +16,16 @@ describe("proxy (password gate)", () => {
     }
   });
 
+  it("lets the schedulers reach the cron routes (they check their own secret)", async () => {
+    for (const path of ["/api/journal/record", "/api/alerts/check", "/api/backup/run"]) expect((await call(path)).headers.get("x-middleware-next"), path).toBe("1");
+  });
+
   it("keeps everything else behind the password", async () => {
     expect((await call("/")).status).toBe(307);
     expect((await call("/api/health")).status).toBe(401);
     expect((await call("/api/outlook/cell?epic=GOLD&key=day")).status).toBe(401);
     expect((await call("/api/journal/signal")).status).toBe(401);
+    expect((await call("/api/backup")).status).toBe(401); // downloading or restoring a backup needs the password
   });
 
   it("locks the whole site when no password is configured", async () => {

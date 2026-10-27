@@ -12,6 +12,7 @@ vi.mock("@/lib/journal/service", () => ({ journalOverview: () => overview() }));
 
 import { CapitalError } from "@/lib/capital";
 import { healthReport, JOURNAL_SILENT_ERROR_MS, JOURNAL_SILENT_WARN_MS } from "@/lib/health";
+import { saveBackup } from "@/lib/backup";
 import { __resetMemoryStorage } from "@/lib/journal/storage";
 
 const by = (r: Awaited<ReturnType<typeof healthReport>>, id: string) => r.checks.find((c) => c.id === id)!;
@@ -38,6 +39,7 @@ afterEach(() => {
 
 describe("health report", () => {
   it("is all green when everything answers", async () => {
+    await saveBackup();
     const r = await healthReport();
     expect(r.overall).toBe("ok");
     expect(by(r, "capital").status).toBe("ok");
@@ -81,6 +83,16 @@ describe("health report", () => {
     expect(by(await healthReport(), "model").status).toBe("ok");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 503 })));
     expect(by(await healthReport(), "model").status).toBe("error");
+  });
+
+  it("watches the backup: none yet, a recent one, a stale one", async () => {
+    expect(by(await healthReport(), "backup").status).toBe("warn");
+    await saveBackup();
+    expect(by(await healthReport(), "backup")).toMatchObject({ status: "ok" });
+    await saveBackup(new Date(Date.now() - 5 * 86_400_000)); // an old file does not count as recent
+    __resetMemoryStorage();
+    await saveBackup(new Date(Date.now() - 5 * 86_400_000));
+    expect(by(await healthReport(), "backup").status).toBe("warn");
   });
 
   it("marks a stale calendar as something to watch", async () => {

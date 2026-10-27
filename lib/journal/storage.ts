@@ -1,6 +1,6 @@
 import "server-only";
 import { getStore } from "@netlify/blobs";
-import { BlobNotFoundError, BlobPreconditionFailedError, get, head, list, put } from "@vercel/blob";
+import { BlobNotFoundError, BlobPreconditionFailedError, del, get, head, list, put } from "@vercel/blob";
 import type { JournalEntry } from "./types";
 
 /** JSON arrays in a key/value store with optimistic concurrency. Defaults to journal entries. */
@@ -12,6 +12,8 @@ export interface JournalStorage {
    */
   write<T = JournalEntry>(key: string, entries: T[], etag: string | null, force?: boolean): Promise<boolean>;
   list(prefix?: string): Promise<string[]>;
+  /** Deletes a file (backups older than the retention period). Nothing happens if it does not exist. */
+  remove(key: string): Promise<void>;
 }
 
 export const PREFIX = "journal/";
@@ -31,6 +33,9 @@ export function memoryStorage(): JournalStorage {
     },
     async list(prefix = PREFIX) {
       return [...files.keys()].filter((k) => k.startsWith(prefix)).sort();
+    },
+    async remove(key) {
+      files.delete(key);
     },
   };
 }
@@ -81,6 +86,13 @@ export function blobStorage(): JournalStorage {
       } while (cursor);
       return keys.sort();
     },
+    async remove(key) {
+      try {
+        await del(key);
+      } catch (err) {
+        if (!(err instanceof BlobNotFoundError)) throw err;
+      }
+    },
   };
 }
 
@@ -108,6 +120,9 @@ export function netlifyStorage(): JournalStorage {
     async list(prefix = PREFIX) {
       const { blobs } = await store().list({ prefix });
       return blobs.map((b) => b.key).sort();
+    },
+    async remove(key) {
+      await store().delete(key);
     },
   };
 }

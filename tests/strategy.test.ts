@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeStats, costBps, recordForecast, resolveEntries, seriesKey, SIM_RR, simulateEntry, type SeriesRef } from "@/lib/journal/journal";
+import { buildCurve, computeStats, costBps, recordForecast, resolveEntries, seriesKey, SIM_RR, simulateEntry, type SeriesRef } from "@/lib/journal/journal";
 import { memoryStorage } from "@/lib/journal/storage";
 import type { JournalEntry } from "@/lib/journal/types";
 import { observedFrom, signalFrom } from "@/lib/signal";
@@ -127,5 +127,43 @@ describe("what the journal keeps at recording time", () => {
     const stored = (await s2.read(seriesKey({ ...series, horizon: 60 }))).entries[0];
     expect("atr" in stored).toBe(false);
     expect("spreadBps" in stored).toBe(false);
+  });
+});
+
+describe("result curve", () => {
+  const resolvedAt = (i: number, outcome: number, over: Partial<JournalEntry> = {}) =>
+    entry({ id: String(i), t: T0 + i * 1800, ref: 100, prev: 100, outcome, ...over });
+
+  it("accumulates the net result and widens the zone chance alone could produce", () => {
+    const entries = Array.from({ length: 40 }, (_, i) => resolvedAt(i, i % 4 === 3 ? 99 : 101)); // 75 % right, +1 % / -1 %
+    const { n, points } = buildCurve(entries, () => 0, () => 0);
+    expect(n).toBe(40);
+    expect(points).toHaveLength(40);
+    expect(points[0].v).toBeCloseTo(1, 6);
+    expect(points.at(-1)!.v).toBeCloseTo(20, 6); // 30 x +1 and 10 x -1
+    expect(points[39].b).toBeGreaterThan(points[3].b); // the zone grows with the number of forecasts
+    expect(points.at(-1)!.v).toBeGreaterThan(points.at(-1)!.b); // 75 % right: outside the zone of chance
+  });
+
+  it("ignores neutral, pending, expired and unchanged forecasts, and subtracts the costs", () => {
+    const entries = [
+      resolvedAt(0, 101),
+      resolvedAt(1, 101, { direction: "flat" }),
+      resolvedAt(2, 100), // price did not move
+      { ...resolvedAt(3, 101), outcome: undefined },
+      resolvedAt(4, 101, { expired: true }),
+    ];
+    const { n, points } = buildCurve(entries, () => 50, () => 0); // 50 bps = 0.5 %
+    expect(n).toBe(1);
+    expect(points[0].v).toBeCloseTo(0.5, 6);
+    expect(buildCurve([], () => 0, () => 0)).toEqual({ n: 0, points: [] });
+  });
+
+  it("keeps times strictly increasing (several instruments share a window) and thins long curves out", () => {
+    const entries = Array.from({ length: 400 }, (_, i) => resolvedAt(i, 101, { id: String(i), t: T0 + Math.floor(i / 2) * 1800 }));
+    const { points } = buildCurve(entries, () => 0, () => 0);
+    expect(points.length).toBeLessThanOrEqual(150);
+    expect(points.every((p, k) => k === 0 || p.t > points[k - 1].t)).toBe(true);
+    expect(points.at(-1)!.v).toBeCloseTo(400, 6); // thinning keeps the last point
   });
 });
