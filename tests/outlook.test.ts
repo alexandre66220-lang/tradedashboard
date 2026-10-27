@@ -17,7 +17,7 @@ vi.mock("@/lib/capital", async () => {
 
 import { INSTRUMENTS, OUTLOOKS } from "@/config/instruments";
 import { __resetMemoryStorage } from "@/lib/journal/storage";
-import { __resetOutlook, buildOutlook } from "@/lib/outlook";
+import { __resetOutlook, buildOutlook, computeCell, findOutlook, readStored } from "@/lib/outlook";
 import { OUTLOOK_PENDING } from "@/lib/types";
 
 const forecast = () => ({
@@ -89,5 +89,38 @@ describe("outlook", () => {
     const errors = r.items.flatMap((i) => Object.values(i.horizons)).filter((h) => "error" in h);
     expect(errors).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  it("reads only what is stored: an empty store is all pending and nothing is computed", async () => {
+    const r = await readStored();
+    expect(r.pending).toBe(true);
+    expect(r.items.flatMap((i) => Object.values(i.horizons))).toHaveLength(cells);
+    expect(r.items.flatMap((i) => Object.values(i.horizons)).every((h) => "error" in h && h.error === OUTLOOK_PENDING)).toBe(true);
+    expect(runForecast).not.toHaveBeenCalled();
+  });
+
+  it("fills the store one forecast at a time, each request waiting for its model run", async () => {
+    runForecast.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return forecast();
+    });
+    for (const inst of INSTRUMENTS) {
+      for (const o of OUTLOOKS) {
+        const found = findOutlook(inst.epic, o.key)!;
+        const stored = await computeCell(found.inst, found.o);
+        expect(stored.cell.direction).toBe("up");
+      }
+    }
+    const r = await readStored();
+    expect(r.pending).toBeUndefined();
+    expect(r.items[0].horizons.week).toMatchObject({ target: 102 });
+    expect(r.items.every((i) => i.last === 101)).toBe(true);
+    expect(runForecast).toHaveBeenCalledTimes(cells);
+  });
+
+  it("only knows the configured instruments and horizons", () => {
+    expect(findOutlook("NOPE", "day")).toBeNull();
+    expect(findOutlook(INSTRUMENTS[0].epic, "year")).toBeNull();
+    expect(findOutlook(INSTRUMENTS[0].epic, OUTLOOKS[0].key)).not.toBeNull();
   });
 });

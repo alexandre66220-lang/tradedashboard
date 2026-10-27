@@ -52,22 +52,92 @@ export default function OutlookPanel({ selected, onSelect }: { selected: string;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let failed = false;
     let pending = false;
+    // What this page has been given for the forecasts that were missing from the store: the forecast itself, or why the
+    // server could not make it. Used even if the store does not return it (the answer of the request is enough).
+    const given = new Map<string, OutlookCell | { error: string }>();
+    const lastPrice = new Map<string, number>();
+
+    const withGiven = (body: OutlookResponse): OutlookResponse => {
+      if (given.size === 0) return body;
+      let stillPending = false;
+      const items = body.items.map((item) => ({
+        ...item,
+        last: item.last ?? lastPrice.get(item.epic) ?? null,
+        horizons: Object.fromEntries(
+          Object.entries(item.horizons).map(([key, cell]) => {
+            const isPending = "error" in cell && cell.error === OUTLOOK_PENDING;
+            const mine = given.get(`${item.epic}|${key}`);
+            if (isPending && mine) return [key, mine];
+            if (isPending) stillPending = true;
+            return [key, cell];
+          }),
+        ),
+      }));
+      return { ...body, items, pending: stillPending };
+    };
+
+    const load = async (): Promise<OutlookResponse | null> => {
+      const res = await fetch("/api/outlook", { signal: ctrl.signal, cache: "no-store" });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return null;
+      }
+      const body = await readJson<OutlookResponse | ApiError>(res);
+      if (!body) throw unexpectedResponse(res);
+      if (!res.ok || "error" in body) throw new Error("error" in body ? body.error.message : `Erreur ${res.status}`);
+      return withGiven(body);
+    };
+
+    // A forecast that is not stored yet is asked for in a request of its own, which waits for the model (two at a time).
+    const fillIn = async (first: OutlookResponse) => {
+      const todo: Array<[string, string]> = [];
+      for (const item of first.items)
+        for (const [key, cell] of Object.entries(item.horizons)) if ("error" in cell && cell.error === OUTLOOK_PENDING) todo.push([item.epic, key]);
+      let next = 0;
+      const worker = async () => {
+        while (next < todo.length && !ctrl.signal.aborted) {
+          const [epic, key] = todo[next++];
+          try {
+            const res = await fetch(`/api/outlook/cell?epic=${encodeURIComponent(epic)}&key=${key}`, { signal: ctrl.signal, cache: "no-store" });
+            if (res.status === 401) {
+              window.location.href = "/login";
+              return;
+            }
+            const body = await readJson<{ cell?: OutlookCell; last?: number | null } & Partial<ApiError>>(res);
+            if (res.ok && body?.cell) {
+              given.set(`${epic}|${key}`, body.cell);
+              if (key === "day" && typeof body.last === "number") lastPrice.set(epic, body.last);
+            } else {
+              given.set(`${epic}|${key}`, { error: body?.error?.message ?? unexpectedResponse(res).message });
+            }
+          } catch (e) {
+            if (ctrl.signal.aborted) return;
+            given.set(`${epic}|${key}`, { error: (e as Error).message || "Serveur injoignable." });
+          }
+          const body = await load().catch(() => null);
+          if (body && !ctrl.signal.aborted) {
+            setData(body);
+            pending = Boolean(body.pending);
+          }
+        }
+      };
+      await Promise.all([worker(), worker()]);
+    };
+
     const run = async () => {
       clearTimeout(timer);
       if (!document.hidden) {
         try {
-          const res = await fetch("/api/outlook", { signal: ctrl.signal, cache: "no-store" });
-          if (res.status === 401) {
-            window.location.href = "/login";
-            return;
+          given.clear();
+          lastPrice.clear();
+          const body = await load();
+          if (body) {
+            setData(body);
+            setError(null);
+            failed = false;
+            pending = Boolean(body.pending);
+            if (body.pending) await fillIn(body);
           }
-          const body = await readJson<OutlookResponse | ApiError>(res);
-          if (!body) throw unexpectedResponse(res);
-          if (!res.ok || "error" in body) throw new Error("error" in body ? body.error.message : `Erreur ${res.status}`);
-          setData(body);
-          setError(null);
-          failed = false;
-          pending = Boolean(body.pending);
         } catch (e) {
           if (ctrl.signal.aborted) return;
           failed = true;
