@@ -104,6 +104,14 @@ button.ghost { background: none; border: 1px solid var(--border); border-radius:
 .bt tbody + tbody tr:first-child > * { border-top: 1px solid #3a3f4d; }
 .bt tr.cur th, .bt tr.cur td { color: var(--accent); font-weight: 600; }
 .bt p { margin: 4px 0 0; }
+.cmp { margin-top: 8px; }
+.cmp button { margin-bottom: 4px; }
+.cmp button:disabled { opacity: .6; cursor: progress; }
+.cmp table { width: 100%; border-collapse: collapse; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.cmp th, .cmp td { padding: 4px 2px 4px 10px; text-align: right; border-top: 1px solid var(--border); font-weight: 400; white-space: nowrap; }
+.cmp thead th { border-top: 0; color: var(--muted); font-size: 11px; }
+.cmp tbody th { padding-left: 2px; text-align: left; color: var(--text); white-space: normal; }
+.cmp tr.cur th, .cmp tr.cur td { font-weight: 600; }
 .hit-edge { color: var(--up); }
 .hit-worse { color: var(--down); }
 .hit-none, .hit-naive, .hit-unknown { color: var(--muted); }

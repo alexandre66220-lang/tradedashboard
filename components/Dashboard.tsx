@@ -374,7 +374,12 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
               {forecast.backtest && (
                 <>
                   <VerdictBadge bt={forecast.backtest} />
-                  <BacktestDetails bt={forecast.backtest} confidence={forecast.confidence} />
+                  <BacktestDetails
+                    bt={forecast.backtest}
+                    confidence={forecast.confidence}
+                    features={forecast.features}
+                    compareQuery={forecast.source?.startsWith("ML") ? `epic=${encodeURIComponent(epic)}&resolution=${resolution}&horizon=${horizon}` : undefined}
+                  />
                 </>
               )}
             </>

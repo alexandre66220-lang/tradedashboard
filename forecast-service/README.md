@@ -7,9 +7,12 @@ Service Python sans état qui fournit la prévision au dashboard quand `FORECAST
 - **Cible** : le prix sera-t-il plus haut ou plus bas dans `horizon` minutes ?
 - **Variables** (une cinquantaine de colonnes, toutes calculées à partir des bougies passées) : rendements sur 1 à 34 bougies normalisés par la volatilité, ratios de volatilité, RSI 14, distance aux moyennes mobiles exponentielles 10/20/50, forme de la bougie (corps, mèches, amplitude), position dans la fourchette des 20 dernières bougies, heure et jour de la semaine (intraday seulement).
 - **Modèle** : moyenne d'un gradient boosting peu profond (`HistGradientBoostingClassifier`, profondeur 3, régularisé) et d'une régression logistique ridge. Les deux sont volontairement bridés : avec ~1 000 bougies, un modèle plus riche apprend surtout du bruit.
-- **Zone neutre** : si la probabilité est entre 47 et 53 %, la prévision est « neutre ».
+- **Version 2** (`ML v2` dans le journal) : le modèle reçoit en option le **volume** des bougies, les **autres instruments** (rendements récents normalisés, sans fuite du futur) et le **spread** de l'instrument. Avec le spread, deux têtes (« hausse de plus que le coût », « baisse de plus que le coût ») remplacent le simple « hausse ou baisse » ; le modèle reste neutre quand un mouvement qui couvre le coût est moins probable que d'habitude. Sans ces options, il se comporte comme la version 1.
+- **Zone neutre** : si la probabilité de direction est entre 47 et 53 %, la prévision est « neutre ».
 - **Amplitude** : `(2p − 1) × amplitude moyenne historique`, une estimation modeste. La bande haute/basse vient de la volatilité récente, bien plus prévisible que la direction.
 - **Backtest** : walk-forward. Le modèle est réentraîné régulièrement et ne prédit qu'avec des données dont le résultat était déjà connu à ce moment-là (aucune fuite du futur). Mêmes statistiques que le dashboard : marge d'erreur, stratégies naïves, réussite par palier de confiance. Le test `test_random_walk_gives_no_edge` vérifie qu'un prix purement aléatoire donne ~50 %.
+
+Le backtest renvoie aussi `coverage` (part des bougies où le modèle prend position) et `avgNetBps` (résultat moyen d'un pari après spread, en points de base). Le mode `compare` rejoue le même backtest (6 réentraînements chacun) pour six variantes du modèle, afin de voir ce que chaque ajout apporte vraiment.
 
 Aucune promesse de précision : sur du court terme, la direction est presque imprévisible. Le dashboard affiche un verdict qui compare le modèle au hasard et aux stratégies naïves.
 
@@ -33,7 +36,7 @@ Sans jeton configuré côté service, il refuse tout (503). Un jeton incorrect d
 ```bash
 cd forecast-service
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m unittest discover -s tests -v    # ~20 s
+.venv/bin/python -m unittest discover -s tests -v    # ~1 min
 ```
 
 Pour le brancher sur `npm run dev`, lancez le service avec `FORECAST_SERVICE_TOKEN=xxx` (par exemple avec `http.server.ThreadingHTTPServer(("127.0.0.1", 4030), api.handler)` depuis `api/forecast.py`) et mettez dans `.env.local` : `FORECAST_SERVICE_URL=http://127.0.0.1:4030/api/forecast` et `FORECAST_SERVICE_TOKEN=xxx`.
@@ -44,7 +47,12 @@ Pour le brancher sur `npm run dev`, lancez le service avec `FORECAST_SERVICE_TOK
 
 ```json
 { "epic": "GOLD", "resolution": "MINUTE_5", "resolutionMinutes": 5, "horizon": 30,
-  "candles": [{ "time": 1730000000, "open": 0, "high": 0, "low": 0, "close": 0 }] }
+  "candles": [{ "time": 1730000000, "open": 0, "high": 0, "low": 0, "close": 0, "volume": 0 }],
+  "spreadBps": 2,
+  "context": [{ "epic": "OIL_CRUDE", "time": [1730000000], "close": [72.1] }],
+  "mode": "forecast" }
 ```
 
-Réponse : même format que `/api/forecast` du dashboard (`points`, `direction`, `confidence`, `backtestHitRate`, `backtestSamples`, `backtest`, `source`). 422 si l'historique est insuffisant (moins de ~150 cas d'entraînement), 400 si la requête est invalide. Le service ne journalise jamais les données reçues.
+`volume`, `spreadBps`, `context` (jusqu'à 4 séries, colonnes `time` / `close`) et `mode` (`forecast` par défaut, ou `compare` : la réponse est alors `{ "variants": [...] }`) sont facultatifs. 100 à 5 000 bougies.
+
+Réponse : même format que `/api/forecast` du dashboard (`points`, `direction`, `confidence`, `backtestHitRate`, `backtestSamples`, `backtest`, `source`, plus `features` : ce que le modèle a regardé). 422 si l'historique est insuffisant (moins de ~150 cas d'entraînement), 400 si la requête est invalide. Le service ne journalise jamais les données reçues.

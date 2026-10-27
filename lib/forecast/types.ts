@@ -9,6 +9,12 @@ export interface ForecastRequest {
   horizon: number;
   /** Oldest first */
   candles: Candle[];
+  /** Assumed spread of the instrument, in basis points of the price (external model: the move must beat it) */
+  spreadBps?: number;
+  /** Price history of the other instruments, as columns (external model: cross-market features) */
+  context?: Array<{ epic: string; time: number[]; close: number[] }>;
+  /** "compare": the external model scores several versions of itself instead of forecasting */
+  mode?: "forecast" | "compare";
 }
 
 export interface ForecastProvider {

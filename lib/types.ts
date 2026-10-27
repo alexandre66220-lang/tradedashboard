@@ -5,6 +5,8 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  /** Traded volume when the broker gives one (tick volume for most CFDs) */
+  volume?: number;
 }
 
 export type MarketStatus = "TRADEABLE" | "CLOSED" | "UNKNOWN" | string;
@@ -41,6 +43,10 @@ export interface BacktestStats extends HitStat {
   baselines: { alwaysUp: HitStat; lastMove: HitStat };
   /** Hit rate when only the predictions above a confidence threshold are kept */
   byConfidence: Array<HitStat & { minConfidence: number }>;
+  /** Mean result of one call after the spread, in basis points (external model only; null below 20 calls) */
+  avgNetBps?: number | null;
+  /** Share of the tested candles on which the model made a call; the rest were "neutral" */
+  coverage?: number | null;
 }
 
 export interface ForecastResponse {
@@ -54,6 +60,21 @@ export interface ForecastResponse {
   /** Detailed backtest (optional for external providers) */
   backtest?: BacktestStats;
   source?: string;
+  /** What the external model looked at, e.g. ["prix", "volume"] */
+  features?: string[];
+}
+
+/** One line of the model comparison: the same walk-forward backtest for one version of the model */
+export interface ModelVariant {
+  name: string;
+  features: string[];
+  hitRate: number | null;
+  samples: number;
+  margin: number | null;
+  avgNetBps: number | null;
+  coverage: number | null;
+  /** This is the version currently used for the forecast */
+  live: boolean;
 }
 
 export interface ApiError {

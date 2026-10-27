@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import type { JournalOverview } from "@/lib/journal/service";
-import type { CrowdFadeGroup, CrowdFadeStats, JournalHit, JournalStats } from "@/lib/journal/types";
+import { MODEL_FAMILIES, type CrowdFadeGroup, type CrowdFadeStats, type JournalHit, type JournalStats, type ModelFamily } from "@/lib/journal/types";
 import { verdict } from "@/lib/verdict";
 import Curve from "./Curve";
 import type { ApiError } from "@/lib/types";
 import Disclaimer from "./Disclaimer";
 
 const POLL_MS = 60_000;
-const MODEL_LABEL = { ml: "Modèle ML", builtin: "Modèle intégré" } as const;
+const MODEL_LABEL: Record<ModelFamily, string> = { ml2: "Modèle ML v2", ml: "Modèle ML v1", builtin: "Modèle intégré" };
+const MODEL_SHORT: Record<ModelFamily, string> = { ml2: "ML v2", ml: "ML v1", builtin: "intégré" };
 
 const fmtHit = (h: JournalHit) =>
   h.hitRate == null ? `${h.hits}/${h.samples}` : `${Math.round(h.hitRate * 100)} % ± ${Math.round((h.margin ?? 0) * 100)}`;
@@ -23,7 +24,7 @@ function verdictOf(st: JournalStats) {
   } });
 }
 
-function ModelBlock({ family, st }: { family: "ml" | "builtin"; st: JournalStats }) {
+function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
   const v = verdictOf(st);
   return (
     <div className="jm">
@@ -56,6 +57,11 @@ function ModelBlock({ family, st }: { family: "ml" | "builtin"; st: JournalStats
         <p className="muted small">
           Selon le sentiment des clients : prévision dans le sens de la foule {fmtHit(st.bySentiment.with)} · à contre-courant{" "}
           {fmtHit(st.bySentiment.against)} · foule partagée {fmtHit(st.bySentiment.neutral)}.
+        </p>
+      )}
+      {st.byNews.near.samples + st.byNews.calm.samples > 0 && (
+        <p className="muted small">
+          Autour des annonces importantes : fenêtre avec annonce {fmtHit(st.byNews.near)} · sans annonce {fmtHit(st.byNews.calm)}.
         </p>
       )}
       <Curve points={st.curve} label="Gains simulés cumulés" />
@@ -155,7 +161,7 @@ export default function JournalPanel() {
     };
   }, []);
 
-  const families = (["ml", "builtin"] as const).filter((f) => data?.models[f]);
+  const families = MODEL_FAMILIES.filter((f) => data?.models[f]);
   const since = families
     .map((f) => data!.models[f]!.firstRecordedAt)
     .filter((t): t is number => t != null)
@@ -208,7 +214,7 @@ export default function JournalPanel() {
                     <th scope="row">
                       {s.name} · {s.label}
                       {s.resolution.startsWith("MINUTE") ? ` · ${s.horizon} min` : ""}
-                      {families.length > 1 ? ` · ${s.model === "ml" ? "ML" : "intégré"}` : ""}
+                      {families.length > 1 ? ` · ${MODEL_SHORT[s.model]}` : ""}
                     </th>
                     <td>{s.stats.evaluated}</td>
                     <td>{fmtHit(s.stats.model)}</td>

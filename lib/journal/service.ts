@@ -1,10 +1,12 @@
 import "server-only";
 import { INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
 import { getCandles, getSentimentFor } from "@/lib/capital";
+import { relevantEvents } from "@/lib/calendar";
+import { getCalendar } from "@/lib/calendar-source";
 import type { Candle, ForecastResponse } from "@/lib/types";
 import { computeCrowdFade, computeStats, modelFamily, parseSeriesKey, recordForecast, resolveSeries, type SeriesRef } from "./journal";
 import { getStorage } from "./storage";
-import type { CrowdFadeStats, JournalEntry, JournalStats, ModelFamily } from "./types";
+import { MODEL_FAMILIES, type CrowdFadeStats, type JournalEntry, type JournalStats, type ModelFamily } from "./types";
 
 export const RESOLUTION_LABELS: Record<string, string> = {
   MINUTE: "1 min",
@@ -14,13 +16,29 @@ export const RESOLUTION_LABELS: Record<string, string> = {
   WEEK: "Semaine",
 };
 
+const NEWS_BEFORE_MIN = 15; // an announcement that just happened still moves the price
+
+/** Did a high-impact announcement fall inside the forecast window? Undefined for daily / weekly series or when the calendar is down. */
+async function newsInWindow(series: SeriesRef, now: number): Promise<boolean | undefined> {
+  if (series.resMinutes >= 1440) return undefined;
+  const inst = INSTRUMENTS.find((i) => i.epic === series.epic);
+  if (!inst) return undefined;
+  try {
+    const { events } = await getCalendar();
+    return relevantEvents(events, inst, now / 1000, -NEWS_BEFORE_MIN, series.horizon).some((e) => e.impact === "high");
+  } catch {
+    return undefined;
+  }
+}
+
 /** Never throws: the journal must not break a forecast. */
 export async function recordSafe(series: SeriesRef, candles: Candle[], forecast: ForecastResponse): Promise<void> {
   const storage = getStorage();
   if (!storage) return;
   try {
     const sentiment = await getSentimentFor(series.epic, INSTRUMENTS.map((i) => i.epic));
-    await recordForecast(storage, series, candles, forecast, Date.now(), sentiment?.long);
+    const now = Date.now();
+    await recordForecast(storage, series, candles, forecast, now, sentiment?.long, await newsInWindow(series, now));
   } catch (err) {
     console.warn("[journal] record failed:", err instanceof Error ? err.message : "unknown");
   }
@@ -58,7 +76,7 @@ export async function journalOverview(): Promise<JournalOverview> {
         }
       }
       all.push(...entries);
-      for (const family of ["ml", "builtin"] as const) {
+      for (const family of MODEL_FAMILIES) {
         const part = entries.filter((e) => modelFamily(e.source) === family);
         if (part.length) {
           series.push({
@@ -76,7 +94,7 @@ export async function journalOverview(): Promise<JournalOverview> {
   );
 
   const models: JournalOverview["models"] = {};
-  for (const family of ["ml", "builtin"] as const) {
+  for (const family of MODEL_FAMILIES) {
     const part = all.filter((e) => modelFamily(e.source) === family);
     if (part.length) models[family] = computeStats(part, spreadBpsFor);
   }

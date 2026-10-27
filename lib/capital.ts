@@ -207,6 +207,7 @@ interface RawPrice {
   closePrice: { bid: number; ask?: number };
   highPrice: { bid: number; ask?: number };
   lowPrice: { bid: number; ask?: number };
+  lastTradedVolume?: number;
 }
 
 function mid(p: { bid: number; ask?: number }): number {
@@ -226,7 +227,8 @@ export function toCandles(prices: RawPrice[]): Candle[] {
     if (!ts || !p.openPrice || !p.closePrice || !p.highPrice || !p.lowPrice) continue;
     const time = parseUtc(ts);
     if (!Number.isFinite(time)) continue;
-    out.push({ time, open: mid(p.openPrice), high: mid(p.highPrice), low: mid(p.lowPrice), close: mid(p.closePrice) });
+    const volume = typeof p.lastTradedVolume === "number" && Number.isFinite(p.lastTradedVolume) && p.lastTradedVolume >= 0 ? p.lastTradedVolume : undefined;
+    out.push({ time, open: mid(p.openPrice), high: mid(p.highPrice), low: mid(p.lowPrice), close: mid(p.closePrice), ...(volume === undefined ? {} : { volume }) });
   }
   out.sort((a, b) => a.time - b.time);
   // Drop duplicate timestamps (keeps the latest)
@@ -238,6 +240,67 @@ export function getCandles(epic: string, resolution: string, max = 1000, ttlMs =
     const q = new URLSearchParams({ resolution, max: String(max) });
     const data = await apiGet<{ prices?: RawPrice[] }>(`/api/v1/prices/${encodeURIComponent(epic)}?${q}`);
     return toCandles(data.prices ?? []);
+  });
+}
+
+// --------------------------------------------------------------------------- long history (for the ML model)
+
+const HISTORY_PAGE = 1000; // the API returns at most 1000 candles per call
+const HISTORY_MAX_PAGES = 12;
+const HISTORY_MAX_EMPTY = 3; // consecutive empty windows (weekends, holidays) before giving up
+const HISTORY_RETRY_MS = 10 * 60_000; // after a failure, do not hit the paging again for a while
+const histories = new Map<string, { candles: Candle[]; complete: boolean }>();
+let pagingFailedAt = 0;
+
+/** "2024-03-01T09:30:00": the date format of the prices endpoint (UTC). */
+const apiDate = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 19);
+
+async function getPageBefore(epic: string, resolution: string, endSec: number, stepSec: number): Promise<Candle[]> {
+  const q = new URLSearchParams({ resolution, max: String(HISTORY_PAGE), from: apiDate(endSec - HISTORY_PAGE * stepSec), to: apiDate(endSec) });
+  const data = await apiGet<{ prices?: RawPrice[] }>(`/api/v1/prices/${encodeURIComponent(epic)}?${q}`);
+  return toCandles(data.prices ?? []);
+}
+
+const STEP_SEC: Record<string, number> = { MINUTE: 60, MINUTE_5: 300, MINUTE_15: 900 };
+
+/**
+ * Up to `target` of the latest candles, paging backwards past the 1000-candle limit. The older part is kept in
+ * memory and only the recent candles are refreshed. If an older page fails, what is already there is returned:
+ * a shorter history makes the model less sure, it must not break the forecast.
+ */
+export function getHistory(epic: string, resolution: string, target: number, ttlMs = 60_000): Promise<Candle[]> {
+  const step = STEP_SEC[resolution];
+  if (!step || target <= HISTORY_PAGE) return getCandles(epic, resolution, Math.min(target, HISTORY_PAGE), ttlMs);
+  return cached(`history|${epic}|${resolution}|${target}`, ttlMs, async () => {
+    const key = `${epic}|${resolution}`;
+    const store = histories.get(key) ?? { candles: [], complete: false };
+    histories.set(key, store);
+    const recent = await getCandles(epic, resolution, HISTORY_PAGE, ttlMs);
+    const merged = new Map(store.candles.map((c) => [c.time, c] as const));
+    for (const c of recent) merged.set(c.time, c);
+    store.candles = [...merged.values()].sort((a, b) => a.time - b.time);
+
+    let empty = 0;
+    const paging = !pagingFailedAt || Date.now() - pagingFailedAt > HISTORY_RETRY_MS;
+    let end = (store.candles[0]?.time ?? Math.floor(Date.now() / 1000)) - 1;
+    try {
+      for (let page = 0; paging && page < HISTORY_MAX_PAGES && !store.complete && store.candles.length < target; page++) {
+        const older = (await getPageBefore(epic, resolution, end, step)).filter((c) => c.time <= end);
+        if (older.length === 0) {
+          if (++empty >= HISTORY_MAX_EMPTY) store.complete = true;
+          end -= HISTORY_PAGE * step;
+          continue;
+        }
+        empty = 0;
+        store.candles = [...older, ...store.candles];
+        end = older[0].time - 1;
+      }
+    } catch (err) {
+      pagingFailedAt = Date.now();
+      console.warn("[capital] older history unavailable:", err instanceof CapitalError ? err.code : "unknown");
+    }
+    store.candles = store.candles.slice(-Math.max(target, HISTORY_PAGE * 2));
+    return store.candles.slice(-target);
   });
 }
 
@@ -307,6 +370,8 @@ export async function getSentimentFor(epic: string, all: string[]): Promise<Sent
 
 /** Test helper */
 export function __resetCapitalState() {
+  histories.clear();
+  pagingFailedAt = 0;
   sentimentFailedAt = 0;
   session = null;
   loginInFlight = null;

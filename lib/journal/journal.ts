@@ -22,7 +22,8 @@ export function parseSeriesKey(key: string): Pick<SeriesRef, "epic" | "resolutio
   return m ? { epic: m[1], resolution: m[2], horizon: Number(m[3]) } : null;
 }
 
-export const modelFamily = (source: string | undefined): ModelFamily => (source?.startsWith("ML") ? "ml" : "builtin");
+export const modelFamily = (source: string | undefined): ModelFamily =>
+  source?.startsWith("ML v2") ? "ml2" : source?.startsWith("ML") ? "ml" : "builtin";
 
 export const stepsFor = (s: Pick<SeriesRef, "resMinutes" | "horizon">) => Math.max(1, Math.round(s.horizon / s.resMinutes));
 
@@ -83,6 +84,7 @@ export async function recordForecast(
   forecast: Pick<ForecastResponse, "direction" | "confidence" | "points" | "source">,
   now = Date.now(),
   sentimentLong?: number | null,
+  news?: boolean,
 ): Promise<boolean> {
   const last = candles.at(-1);
   const target = forecast.points.at(-1)?.value;
@@ -110,6 +112,7 @@ export async function recordForecast(
     target,
     source: forecast.source ?? "intégré",
     ...(typeof sentimentLong === "number" && Number.isFinite(sentimentLong) ? { sentiment: Math.round(sentimentLong * 10) / 10 } : {}),
+    ...(typeof news === "boolean" ? { news } : {}),
   };
   const wrote = await updateSeries(storage, seriesKey(series), (entries) => {
     const { entries: resolved, changed } = resolveEntries(entries, candles);
@@ -155,6 +158,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
   let pending = 0, expired = 0, flat = 0, hits = 0, upHits = 0, lastHits = 0, evaluated = 0;
   let gross = 0, net = 0;
   const crowd: Record<CrowdRelation, { hits: number; n: number }> = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
+  const byNews = { near: { hits: 0, n: 0 }, calm: { hits: 0, n: 0 } };
   const curve: JournalStats["curve"] = [];
   let first: number | null = null;
 
@@ -183,6 +187,11 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
       g.n++;
       g.hits += (e.direction === "up") === up ? 1 : 0;
     }
+    if (e.news !== undefined) {
+      const g = byNews[e.news ? "near" : "calm"];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+    }
     upHits += up ? 1 : 0;
     lastHits += e.ref - e.prev >= 0 === up ? 1 : 0;
     const r = sign * (e.outcome / e.ref - 1);
@@ -199,6 +208,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     model: hit(hits, evaluated),
     baselines: { alwaysUp: hit(upHits, evaluated), lastMove: hit(lastHits, evaluated) },
     bySentiment: { with: hit(crowd.with.hits, crowd.with.n), against: hit(crowd.against.hits, crowd.against.n), neutral: hit(crowd.neutral.hits, crowd.neutral.n) },
+    byNews: { near: hit(byNews.near.hits, byNews.near.n), calm: hit(byNews.calm.hits, byNews.calm.n) },
     netReturnPct: net * 100,
     grossReturnPct: gross * 100,
     curve,

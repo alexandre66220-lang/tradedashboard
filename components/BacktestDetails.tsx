@@ -1,5 +1,6 @@
 import type { BacktestStats, HitStat } from "@/lib/types";
 import { verdict } from "@/lib/verdict";
+import ModelCompare from "./ModelCompare";
 
 export const fmtHit = (s: Pick<HitStat, "hitRate" | "margin"> | null | undefined) =>
   s?.hitRate == null ? "—" : `${Math.round(s.hitRate * 100)} %${s.margin != null ? ` ± ${Math.round(s.margin * 100)}` : ""}`;
@@ -20,7 +21,19 @@ function Row({ label, stat, current }: { label: string; stat: HitStat; current?:
 }
 
 /** Detail of the backtest: naive baselines and hit rate by confidence level. */
-export default function BacktestDetails({ bt, confidence }: { bt: BacktestStats; confidence: number }) {
+export default function BacktestDetails({
+  bt,
+  confidence,
+  features,
+  compareQuery,
+}: {
+  bt: BacktestStats;
+  confidence: number;
+  /** What the external model looked at */
+  features?: string[];
+  /** Query string (epic, resolution, horizon) to compare model versions; only for the external model */
+  compareQuery?: string;
+}) {
   // Strongest threshold the current prediction reaches
   const current = [...bt.byConfidence].reverse().find((c) => confidence >= c.minConfidence)?.minConfidence;
   return (
@@ -50,6 +63,16 @@ export default function BacktestDetails({ bt, confidence }: { bt: BacktestStats;
           ))}
         </tbody>
       </table>
+      {(bt.coverage != null || bt.avgNetBps != null) && (
+        <p className="muted small">
+          {bt.coverage != null ? `Le modèle prend position sur ${Math.round(bt.coverage * 100)} % des bougies testées (le reste : neutre). ` : ""}
+          {bt.avgNetBps != null
+            ? `Résultat moyen d’un pari après spread : ${bt.avgNetBps > 0 ? "+" : ""}${bt.avgNetBps.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} pt (1 pt = 0,01 % du prix).`
+            : ""}
+        </p>
+      )}
+      {features && features.length > 0 && <p className="muted small">Le modèle regarde : {features.join(", ")}.</p>}
+      {compareQuery && <ModelCompare query={compareQuery} />}
       <p className="muted small">
         « ± » : marge d’erreur à ~95 %. Si la réussite moins cette marge ne dépasse pas 50 %, le résultat peut s’expliquer
         par le hasard. Les stratégies naïves sont testées sur les mêmes cas : un modèle utile doit faire mieux qu’elles.

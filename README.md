@@ -65,6 +65,21 @@ Instruments actuels : or (`GOLD`), pétrole WTI (`OIL_CRUDE`), bitcoin (`BTCUSD`
 
 **Modèle intégré** (`lib/forecast/builtin.ts`) : pente d'une régression linéaire pondérée (exponentiellement) sur les 48 dernières clôtures en log, réduite de moitié ; bande = ±1,28 × volatilité récente × √pas (~80 %). La direction est « neutre » si le mouvement attendu est faible devant le bruit. Le taux de réussite est un backtest de cette même fonction sur l'historique chargé (directions neutres exclues). Aucune promesse de précision.
 
+### Modèle ML v2 : ce qu'il regarde en plus
+
+Avec `FORECAST_SERVICE_URL`, le service Python (`forecast-service/`) reçoit davantage que les 1 000 bougies du graphique (`lib/forecast/enrich.ts`) :
+
+- **Historique plus long** : jusqu'à 5 000 bougies en 5 et 15 min (4 000 en 1 min), lues par tranches de 1 000 avec les dates `from` / `to` du même appel de prix (`getHistory` dans `lib/capital.ts`, lecture seule). Les tranches anciennes restent en mémoire, seules les récentes sont rafraîchies. Si l'API refuse ou ignore `from` / `to` (je n'ai pas pu vérifier ce point sur la vraie API), le modèle retombe sur 1 000 bougies et ne réessaie pas avant 10 min.
+- **Volume** des bougies, si au moins 80 % en ont un.
+- **Les autres instruments** (rendements récents de l'or, du pétrole et du bitcoin, alignés sur la dernière bougie déjà commencée : aucune donnée du futur).
+- **Le coût du spread** : au lieu de « hausse ou baisse », le modèle estime la probabilité que le prix bouge **de plus que le spread** vers le haut ou vers le bas. Il reste neutre quand ce mouvement est peu probable. Le spread vient de `spreadBps` dans `config/instruments.ts`.
+
+Le calendrier et le sentiment des clients ne sont **pas** des variables du modèle : les sources ne donnent aucun historique, impossible de les apprendre sur le passé. Ils sont enregistrés avec chaque prévision du journal (sentiment, et « une annonce forte tombe dans la fenêtre » pour les séries intraday), pour juger plus tard s'ils aident.
+
+**« Comparer les versions du modèle »** (dans « Détail du backtest », route `GET /api/forecast/compare`, calcul à la demande, 10–20 s) : le même backtest sans fuite du futur pour six versions (prix seul, + volume, + autres instruments, + coût du spread, version plus prudente, version plus souple), avec marge d'erreur et gain net par pari après spread. C'est le garde-fou contre l'auto-persuasion : une variante n'est retenue que si sa marge exclut 50 % **et** que son net est positif. Plus on compare de variantes, plus l'une paraît bonne par hasard ; le juge final reste le journal en direct.
+
+Dans le journal, les prévisions du modèle v2 sont comptées à part (« Modèle ML v2 ») de celles de la première version (« Modèle ML v1 ») : on ne mélange pas les deux.
+
 ### Journal des prévisions en direct
 
 Le backtest rejoue le passé ; le journal juge les prévisions **en conditions réelles**. Pour chaque instrument et chaque horizon, une prévision est enregistrée à l'avance par fenêtre d'horizon (donc sans chevauchement : une toutes les 30 min, une par jour, une par semaine), puis comparée au vrai prix à l'échéance, avec la même définition que le backtest (clôtures finales, bougies décalées de `horizon / résolution`).
