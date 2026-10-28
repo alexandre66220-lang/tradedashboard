@@ -1,11 +1,15 @@
 import "server-only";
 import { INSTRUMENTS } from "@/config/instruments";
+import type { Trade, TradeModel } from "./trades";
+import { readTrades, updateTrades } from "./trades-store";
 import { hmacHex, timingSafeEqualStr } from "./auth";
 import {
+  amendPositionStop,
   assertDemoOnly,
   capitalEnv,
   CapitalError,
   closePositionDeal,
+  getCloseInfo,
   getConfirmation,
   getFreshQuote,
   listPositions,
@@ -191,7 +195,10 @@ export async function ordersState(): Promise<OrdersState> {
   if (capitalEnv() !== "demo") return { enabled: false, reason: "live", limits: LIMITS };
   if (!tradingEnabled()) return { enabled: false, reason: "off", limits: LIMITS };
   try {
-    return { enabled: true, limits: LIMITS, positions: await listPositions() };
+    const positions = await listPositions();
+    // Keeps "Mes trades" in line with the account (closed by a stop or a target, stop moved, opened elsewhere); never fails the panel
+    await syncDemoTrades(Date.now(), positions).catch((err) => console.warn("[orders] sync failed:", err instanceof Error ? err.message : "unknown"));
+    return { enabled: true, limits: LIMITS, positions };
   } catch (err) {
     return { enabled: true, limits: LIMITS, positionsError: err instanceof CapitalError ? err.message : "Positions illisibles." };
   }
@@ -222,6 +229,8 @@ export interface DealResult {
   dealId: string | null;
   level: number | null;
   dealReference: string;
+  /** The accepted order was written into "Mes trades" */
+  logged?: boolean;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -240,7 +249,15 @@ async function confirm(dealReference: string): Promise<DealResult> {
   return { status: c.accepted ? "accepted" : "rejected", reason: c.reason, dealId: c.dealId, level: c.level, dealReference };
 }
 
-export async function placeOrder(token: unknown, now = Date.now()): Promise<DealResult & { order: Order }> {
+/** What the forecast said when the order was sent; kept with the trade so that the result can be compared with it. */
+export function parseModel(raw: unknown): TradeModel | null {
+  const m = raw as Record<string, unknown> | null | undefined;
+  if (!m || typeof m !== "object") return null;
+  if (!["up", "down", "flat"].includes(m.direction as string) || typeof m.confidence !== "number" || !Number.isFinite(m.confidence) || typeof m.source !== "string") return null;
+  return { direction: m.direction as TradeModel["direction"], confidence: m.confidence, source: m.source.slice(0, 80) };
+}
+
+export async function placeOrder(token: unknown, model: unknown = null, now = Date.now()): Promise<DealResult & { order: Order }> {
   gate();
   const recap = await readRecap(token, now);
   if (!recap) throw new CapitalError("TRADING_REFUSED", "Confirmation expirée ou invalide : vérifiez l'ordre de nouveau.", 400);
@@ -263,7 +280,44 @@ export async function placeOrder(token: unknown, now = Date.now()): Promise<Deal
     ...(recap.o.target !== null ? { profitLevel: recap.o.target } : {}),
   });
   console.info(`[orders] demo order sent: ${recap.o.epic} ${recap.o.side} size=${recap.o.size}`);
-  return { ...(await confirm(ref)), order: recap.o };
+  const result = await confirm(ref);
+  let logged = false;
+  if (result.status === "accepted" && result.dealId && result.level !== null) {
+    // The broker has the order whatever happens here: a failure to write the trade is reported, and the next sync adopts the position
+    logged = await logDemoTrade(recap.o, result.dealId, result.level, parseModel(model), now).then(() => true, () => false);
+  }
+  return { ...result, logged, order: recap.o };
+}
+
+async function logDemoTrade(order: Order, dealId: string, level: number, model: TradeModel | null, now: number): Promise<void> {
+  await updateTrades<null>((trades) => {
+    if (trades.some((t) => t.dealId === dealId)) return { trades, result: null };
+    const trade: Trade = {
+      id: crypto.randomUUID(),
+      epic: order.epic,
+      side: order.side,
+      openedAt: now,
+      entry: level,
+      size: order.size,
+      stop: order.stop,
+      ...(order.target !== null ? { target: order.target } : {}),
+      model,
+      note: "Ordre passé depuis le dashboard (compte démo).",
+      dealId,
+      demo: true,
+    };
+    return { trades: [...trades, trade], result: null };
+  });
+}
+
+async function patchTrade(dealId: string, fn: (t: Trade) => Trade): Promise<boolean> {
+  return updateTrades<boolean>((trades) => {
+    const i = trades.findIndex((t) => t.dealId === dealId);
+    if (i < 0) return { trades, result: false };
+    const copy = [...trades];
+    copy[i] = fn(trades[i]);
+    return { trades: copy, result: true };
+  });
 }
 
 export async function closeOrder(dealId: string): Promise<DealResult> {
@@ -272,5 +326,137 @@ export async function closeOrder(dealId: string): Promise<DealResult> {
   assertDemoOnly();
   const ref = await closePositionDeal(dealId);
   console.info("[orders] demo position closed");
-  return confirm(ref);
+  const result = await confirm(ref);
+  if (result.status === "accepted" && result.level !== null) {
+    const exit = result.level;
+    // The price Capital.com confirmed is the exact exit; without it the sync looks it up in the account activity
+    await patchTrade(dealId, (t) => (t.exit === undefined ? { ...t, exit, closedAt: Date.now() } : t)).catch(() => false);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Moving a stop
+
+export interface StopMoveInput {
+  side: "long" | "short";
+  /** Current stop of the position, if any */
+  currentStop: number | null;
+  newStop: number;
+}
+
+/** A stop only ever moves closer to the price (never away: that would be taking back the protection), and stays clear of the spread. */
+export function assessStopMove(i: StopMoveInput, quote: QuoteLike): Parsed<null> {
+  if (quote.status !== "TRADEABLE") return { ok: false, error: "Le marché n'est pas ouvert à la négociation pour l'instant." };
+  if (quote.bid === null || quote.offer === null || quote.offer < quote.bid) return { ok: false, error: "Pas de cotation exploitable pour cet instrument." };
+  if (!Number.isFinite(i.newStop) || i.newStop <= 0) return { ok: false, error: "Niveau de stop invalide." };
+  const spread = quote.offer - quote.bid;
+  if (i.side === "long") {
+    if (i.newStop >= quote.bid - spread) return { ok: false, error: `Le stop doit rester sous le prix actuel (${quote.bid}), avec au moins l'écart achat/vente de marge.` };
+    if (i.currentStop !== null && i.newStop <= i.currentStop) return { ok: false, error: `Le stop ne peut que se resserrer : il est déjà à ${i.currentStop}.` };
+  } else {
+    if (i.newStop <= quote.offer + spread) return { ok: false, error: `Le stop doit rester au-dessus du prix actuel (${quote.offer}), avec au moins l'écart achat/vente de marge.` };
+    if (i.currentStop !== null && i.newStop >= i.currentStop) return { ok: false, error: `Le stop ne peut que se resserrer : il est déjà à ${i.currentStop}.` };
+  }
+  return { ok: true, value: null };
+}
+
+export async function moveStop(dealId: string, newStop: unknown): Promise<DealResult & { stop: number }> {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(dealId)) throw new CapitalError("TRADING_REFUSED", "Identifiant de position invalide.", 400);
+  // Protective, so allowed even when new orders are switched off. Demo only.
+  assertDemoOnly();
+  if (typeof newStop !== "number" || !Number.isFinite(newStop)) throw new CapitalError("TRADING_REFUSED", "Niveau de stop invalide.", 400);
+  const positions = await listPositions();
+  const p = positions.find((x) => x.dealId === dealId);
+  if (!p) throw new CapitalError("TRADING_REFUSED", "Position introuvable : elle est peut-être déjà fermée.", 404);
+  const quote = await getFreshQuote(p.epic);
+  const check = assessStopMove({ side: p.direction === "BUY" ? "long" : "short", currentStop: p.stopLevel, newStop }, quote);
+  if (!check.ok) throw new CapitalError("TRADING_REFUSED", check.error, 422);
+  const ref = await amendPositionStop(dealId, newStop, p.profitLevel);
+  console.info("[orders] demo stop moved");
+  const result = await confirm(ref);
+  if (result.status === "accepted") await patchTrade(dealId, (t) => ({ ...t, stopMoved: newStop })).catch(() => false);
+  return { ...result, stop: newStop };
+}
+
+// ---------------------------------------------------------------------------
+// Keeping "Mes trades" in line with the demo account
+
+/**
+ * Compares the open positions of the demo account with the trades that follow a deal:
+ * - a position nobody noted (opened on Capital.com itself, or whose trade could not be written) is added;
+ * - a trade whose position is gone is closed at the price the account activity gives (stop or target hit, or closed
+ *   elsewhere); without that price the trade is only flagged, so that the exit is entered by hand and never guessed;
+ * - a stop moved elsewhere is picked up.
+ */
+export async function syncDemoTrades(now = Date.now(), known?: OpenPosition[]): Promise<number> {
+  assertDemoOnly();
+  const positions = known ?? (await listPositions());
+  const trades = await readTrades();
+  if (trades === null) return 0;
+  const epics = new Set(INSTRUMENTS.map((i) => i.epic));
+  const byDeal = new Map(trades.filter((t) => t.dealId).map((t) => [t.dealId as string, t] as const));
+  const open = new Set(positions.map((p) => p.dealId));
+
+  const adopt = positions.filter((p) => !byDeal.has(p.dealId) && epics.has(p.epic));
+  const gone = trades.filter((t) => t.dealId && t.exit === undefined && !open.has(t.dealId));
+  const closes = new Map<string, { level: number; at: number | null } | null>();
+  for (const t of gone) closes.set(t.dealId as string, await getCloseInfo(t.dealId as string, t.openedAt).catch(() => null));
+
+  const moves = new Map<string, number>();
+  for (const p of positions) {
+    const t = byDeal.get(p.dealId);
+    if (t && t.exit === undefined && p.stopLevel !== null && p.stopLevel !== (t.stopMoved ?? t.stop)) moves.set(p.dealId, p.stopLevel);
+  }
+  if (!adopt.length && !gone.length && !moves.size) return 0;
+
+  let changed = 0;
+  await updateTrades<null>((current) => {
+    changed = 0;
+    const next = current.map((t) => {
+      const id = t.dealId;
+      if (!id || t.exit !== undefined) return t;
+      if (!open.has(id)) {
+        const c = closes.get(id);
+        if (c) {
+          changed++;
+          return { ...t, exit: c.level, closedAt: Math.max(t.openedAt, c.at ?? now) };
+        }
+        if (t.brokerClosed === undefined) {
+          changed++;
+          return { ...t, brokerClosed: now };
+        }
+        return t;
+      }
+      const m = moves.get(id);
+      if (m !== undefined) {
+        changed++;
+        return t.stop !== undefined && m === t.stop ? t : { ...t, stopMoved: m };
+      }
+      return t;
+    });
+    const have = new Set(next.map((t) => t.dealId).filter(Boolean));
+    for (const p of adopt) {
+      if (have.has(p.dealId)) continue;
+      const long = p.direction === "BUY";
+      const protective = p.stopLevel !== null && (long ? p.stopLevel < p.level : p.stopLevel > p.level);
+      changed++;
+      next.push({
+        id: crypto.randomUUID(),
+        epic: p.epic,
+        side: long ? "long" : "short",
+        openedAt: p.createdAt ?? now,
+        entry: p.level,
+        size: p.size,
+        ...(protective ? { stop: p.stopLevel as number } : p.stopLevel !== null ? { stopMoved: p.stopLevel } : {}),
+        ...(p.profitLevel !== null && (long ? p.profitLevel > p.level : p.profitLevel < p.level) ? { target: p.profitLevel } : {}),
+        model: null,
+        note: "Position du compte démo reprise automatiquement.",
+        dealId: p.dealId,
+        demo: true,
+      });
+    }
+    return { trades: next, result: null };
+  });
+  return changed;
 }

@@ -131,7 +131,9 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const ordersEnabled = orders.state?.enabled === true;
   const reloadOrders = orders.reload;
   useEffect(() => {
-    if (activeTab === "trade" && ordersEnabled) reloadOrders();
+    // opening the tab also lets the server match "Mes trades" with the account (positions closed by a stop or a target)
+    if (activeTab === "trade" && ordersEnabled) reloadOrders().then(() => tradeLog.reload());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, ordersEnabled, reloadOrders]);
   const calendar = useCalendar();
   const priceAlerts = useAlerts();
@@ -513,7 +515,15 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
                 : undefined
             }
           />
-          <OrderPanel orders={orders} epic={epic} decimals={decimals} last={last?.close ?? null} draft={orderDraft} onLog={logTrade} />
+          <OrderPanel
+            orders={orders}
+            epic={epic}
+            decimals={decimals}
+            last={last?.close ?? null}
+            draft={orderDraft}
+            model={forecast ? { direction: forecast.direction, confidence: forecast.confidence, source: forecast.source ?? "intégré" } : null}
+            onTradesChanged={tradeLog.reload}
+          />
           </div>
           <div role="tabpanel" id="panel-journal" aria-labelledby="tab-journal" className="tabpanel" hidden={activeTab !== "journal"}>
       <TradesPanel

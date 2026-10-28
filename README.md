@@ -51,7 +51,7 @@ Une ligne dans `config/instruments.ts` :
 { name: "Argent", epic: "SILVER", defaultHorizon: 30 },
 ```
 
-Instruments actuels : or (`GOLD`), pétrole WTI (`OIL_CRUDE`), bitcoin (`BTCUSD`). Le sélecteur d'actif apparaît automatiquement dès qu'il y a au moins deux instruments, et chaque instrument a sa ligne dans le panneau « Prévisions jour / semaine ». Pour trouver l'epic exact, cherchez le marché dans la plateforme Capital.com ou via `GET /api/v1/markets?searchTerm=...`.
+Instruments actuels : or (`GOLD`), pétrole WTI (`OIL_CRUDE`), bitcoin (`BTCUSD`), Nasdaq 100 (`US100`), S&P 500 (`US500`) et Euro / Dollar (`EURUSD`). Les epics sont ceux de Capital.com : si l'un est refusé (« Instrument inconnu chez Capital.com »), corrigez-le dans `config/instruments.ts`. Les coûts (`spreadBps`, `financingBpsPerDay`) sont des hypothèses à ajuster. Le champ facultatif `related` liste les (4 au plus) instruments que le modèle ML regarde en plus, par exemple le dollar pour l'or ; sans lui, ce sont les quatre premiers autres. Le relevé du journal traite les instruments trois par trois. Le sélecteur d'actif apparaît automatiquement dès qu'il y a au moins deux instruments, et chaque instrument a sa ligne dans le panneau « Prévisions jour / semaine ». Pour trouver l'epic exact, cherchez le marché dans la plateforme Capital.com ou via `GET /api/v1/markets?searchTerm=...`.
 
 ## Prévision
 
@@ -140,7 +140,9 @@ Option **désactivée par défaut**. Pour l'activer : variable `TRADING_ENABLED=
 - **Fermer une position** : bouton « Fermer » en deux appuis (le premier arme le bouton 5 secondes). La fermeture reste possible même si les nouveaux ordres sont coupés.
 - **Si la réponse de Capital.com n'arrive pas**, l'appli le dit (« l'ordre a peut-être été envoyé ») au lieu de réessayer : vérifiez la liste des positions.
 - **Protection des routes** : derrière le mot de passe du site comme tout le reste, et en plus réservées aux requêtes venant des pages du site (en-tête `Origin` vérifié).
-- Les ordres ne sont pas enregistrés par l'appli (pas de dépendance au stockage) : « Noter dans mon journal » reporte l'ordre exécuté dans « Mes trades ».
+- **Noté automatiquement** : un ordre accepté est écrit dans « Mes trades » (badge DÉMO) avec le prix d'exécution réel, le stop, l'objectif et la prévision du moment (sens, confiance, modèle). « Dans le sens du modèle » / « à contre-sens » compare ensuite vos résultats à ce que le modèle disait.
+- **Fermeture reportée** : fermée depuis le dashboard, le prix confirmé par Capital.com est utilisé ; fermée par le stop, l'objectif ou sur la plateforme Capital.com, le serveur lit le prix dans l'historique d'activité (`GET /api/v1/history/activity`, lecture seule). Il compare les positions du compte démo et « Mes trades » à l'ouverture de l'onglet Trade et toutes les 5 minutes par la tâche des alertes. Si l'historique ne donne pas le prix, le trade est seulement signalé (« n'est plus ouverte chez Capital.com ») et **le prix de sortie est à saisir** : il n'est jamais deviné. Une position du compte démo que personne n'a notée est reprise automatiquement.
+- **Déplacer le stop** (`PATCH /api/orders/{dealId}`, `PUT /api/v1/positions/{dealId}`) : champ + bouton « À l'entrée » + « Déplacer le stop » (deux appuis). Un stop ne peut que **se rapprocher** du prix, jamais s'en éloigner, reste du bon côté du prix avec au moins le spread de marge, et l'objectif existant est renvoyé avec la demande. Le stop d'origine reste la base du résultat en R ; le stop déplacé est noté à côté. Possible même quand les nouveaux ordres sont coupés.
 - Ce n'est pas un conseil d'investissement, et rien ici ne prouve qu'un signal est rentable : voir « Signal validé ».
 
 ### Feu « pas de trade maintenant »

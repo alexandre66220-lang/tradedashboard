@@ -20,15 +20,17 @@ interface Props {
   decimals: number;
   last: number | null;
   draft: OrderDraft | null;
-  /** Sends a filled order to the trade log form */
-  onLog?: (d: { side: "long" | "short"; entry: number; size: number; stop: number; target?: number }) => void;
+  /** What the forecast says now: kept with the order, to compare the result with it later */
+  model: { direction: "up" | "down" | "flat"; confidence: number; source: string } | null;
+  /** Called when the trade log changed (an order was noted, a position closed) */
+  onTradesChanged?: () => void;
 }
 
 const num = (s: string) => Number(s.replace(",", "."));
 const money = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 const time = (ms: number) => new Date(ms).toLocaleTimeString("fr-FR");
 
-export default function OrderPanel({ orders, epic, decimals, last, draft, onLog }: Props) {
+export default function OrderPanel({ orders, epic, decimals, last, draft, model, onTradesChanged }: Props) {
   const [side, setSide] = useState<"long" | "short">("long");
   const [size, setSize] = useState("");
   const [stop, setStop] = useState("");
@@ -40,6 +42,9 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
   const [now, setNow] = useState(Date.now());
   const [armed, setArmed] = useState<string | null>(null);
   const [closeMsg, setCloseMsg] = useState<string | null>(null);
+  // Stop to move to, per open position (text), and the position whose move was armed with a first tap
+  const [stopText, setStopText] = useState<Record<string, string>>({});
+  const [armedStop, setArmedStop] = useState<string | null>(null);
 
   // Levels belong to one instrument: start again when another one is shown
   useEffect(() => {
@@ -70,6 +75,12 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
   }, [recap]);
 
   // A second tap is required to close a position: the first one arms the button for a few seconds
+  useEffect(() => {
+    if (!armedStop) return;
+    const id = setTimeout(() => setArmedStop(null), 5000);
+    return () => clearTimeout(id);
+  }, [armedStop]);
+
   useEffect(() => {
     if (!armed) return;
     const id = setTimeout(() => setArmed(null), 5000);
@@ -132,11 +143,12 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
     setBusy(true);
     setError(null);
     const sent = { sentSide: recap.order.side, sentSize: recap.order.size, sentStop: recap.order.stop, sentTarget: recap.order.target };
-    const r = await orders.send(recap.token);
+    const r = await orders.send(recap.token, model);
     setBusy(false);
     setRecap(null);
     if (!r.ok) return setError(r.error);
     setResult({ ...r.body, ...sent });
+    onTradesChanged?.();
   }
 
   async function closeDeal(dealId: string) {
@@ -147,6 +159,18 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
     const r = await orders.close(dealId);
     setBusy(false);
     setCloseMsg(!r.ok ? r.error : r.body.status === "accepted" ? "Position fermée." : r.body.status === "rejected" ? `Fermeture refusée (${r.body.reason}).` : "Demande envoyée : vérifiez la liste des positions.");
+    onTradesChanged?.();
+  }
+
+  async function moveStopTo(dealId: string, value: string) {
+    if (armedStop !== dealId) return setArmedStop(dealId);
+    setArmedStop(null);
+    setBusy(true);
+    setCloseMsg(null);
+    const r = await orders.moveStop(dealId, num(value));
+    setBusy(false);
+    setCloseMsg(!r.ok ? r.error : r.body.status === "accepted" ? `Stop déplacé à ${r.body.stop}.` : r.body.status === "rejected" ? `Déplacement refusé (${r.body.reason}).` : "Demande envoyée : vérifiez la liste des positions.");
+    onTradesChanged?.();
   }
 
   const fmt = (v: number) => v.toFixed(decimals);
@@ -223,14 +247,9 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
           {result.status === "accepted" && (
             <>
               <p className="pos">Ordre accepté{result.level !== null ? ` · exécuté à ${fmt(result.level)}` : ""}.</p>
-              {onLog && result.level !== null && (
-                <button
-                  className="ghost"
-                  onClick={() => onLog({ side: result.sentSide, entry: result.level as number, size: result.sentSize, stop: result.sentStop, ...(result.sentTarget !== null ? { target: result.sentTarget } : {}) })}
-                >
-                  Noter dans mon journal
-                </button>
-              )}
+              <p className="muted small">
+                {result.logged ? "Noté automatiquement dans « Mes trades », avec la prévision du moment." : "L’ordre est passé mais n’a pas pu être noté dans « Mes trades » : la position y sera reprise à la prochaine actualisation."}
+              </p>
             </>
           )}
           {result.status === "rejected" && <p className="rc-warn">Refusé par Capital.com : {result.reason}.</p>}
@@ -271,11 +290,35 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, onLog 
             <button className={armed === p.dealId ? "order-close armed" : "ghost order-close"} disabled={busy} onClick={() => closeDeal(p.dealId)}>
               {armed === p.dealId ? "Confirmer" : "Fermer"}
             </button>
+            <div className="order-stop">
+              <span className="rc-input">
+                <input
+                  inputMode="decimal"
+                  aria-label={`Nouveau stop pour ${p.name}`}
+                  placeholder={p.stopLevel !== null ? `stop ${p.stopLevel}` : "nouveau stop"}
+                  value={stopText[p.dealId] ?? ""}
+                  onChange={(e) => {
+                    setStopText({ ...stopText, [p.dealId]: e.target.value });
+                    setArmedStop(null);
+                  }}
+                />
+              </span>
+              <button className="ghost mini" disabled={busy} onClick={() => setStopText({ ...stopText, [p.dealId]: String(p.level) })}>
+                À l’entrée
+              </button>
+              <button
+                className={armedStop === p.dealId ? "order-close armed" : "ghost mini"}
+                disabled={busy || !(num(stopText[p.dealId] ?? "") > 0)}
+                onClick={() => moveStopTo(p.dealId, stopText[p.dealId] ?? "")}
+              >
+                {armedStop === p.dealId ? "Confirmer" : "Déplacer le stop"}
+              </button>
+            </div>
           </li>
         ))}
       </ul>
       <Disclaimer>
-        Les ordres ne partent que vers le compte démo de Capital.com (de l’argent fictif), jamais vers le compte réel, et seulement après votre confirmation : le
+        Les ordres ne partent que vers le compte démo de Capital.com (de l’argent fictif), jamais vers le compte réel, et seulement après votre confirmation. Chaque ordre est noté dans « Mes trades » avec la prévision du moment, et la fermeture (par vous, par le stop ou par l’objectif) y est reportée automatiquement. Un stop ne peut que se rapprocher du prix, jamais s’en éloigner : le
         serveur vérifie d’abord l’ordre (stop obligatoire du bon côté, taille et nombre de positions limités, pas de doublon, prix actuel) puis vous montre le
         récapitulatif. Le prix d’exécution peut différer un peu du prix estimé. Pour couper les ordres : retirez TRADING_ENABLED dans Netlify et redéployez. Ce n’est
         pas un conseil d’investissement.

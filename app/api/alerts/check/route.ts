@@ -3,7 +3,8 @@ import { INSTRUMENTS } from "@/config/instruments";
 import { mergeSent, runChecks, type PriceAlert, type SentRecord } from "@/lib/alerts";
 import { timingSafeEqualStr } from "@/lib/auth";
 import { getCalendar } from "@/lib/calendar-source";
-import { getCandles } from "@/lib/capital";
+import { capitalEnv, getCandles } from "@/lib/capital";
+import { syncDemoTrades, tradingEnabled } from "@/lib/orders";
 import { handleError, jsonError } from "@/lib/http";
 import { getStorage } from "@/lib/journal/storage";
 import { notifyConfigured, sendNotification } from "@/lib/notify";
@@ -26,6 +27,8 @@ export async function GET(req: Request) {
   if (!timingSafeEqualStr(req.headers.get("authorization") ?? "", `Bearer ${secret}`)) {
     return jsonError("UNAUTHORIZED", "Authentification requise.", 401);
   }
+  // Keeps "Mes trades" in line with the demo account even when the dashboard is closed (stop or target hit, stop moved)
+  if (tradingEnabled() && capitalEnv() === "demo") await syncDemoTrades().catch(() => 0);
   if (!notifyConfigured()) return NextResponse.json({ sent: 0, note: "notifications non configurées (NTFY_TOPIC)" });
   if (!getStorage()) return NextResponse.json({ sent: 0, note: "stockage non configuré" });
 

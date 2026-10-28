@@ -43,8 +43,8 @@ export function useOrders() {
 
   const preview = useCallback((order: { epic: string; side: "long" | "short"; size: number; stop: number; target?: number }) => call<Recap>("/api/orders/preview", { method: "POST", body: JSON.stringify(order) }), []);
   const send = useCallback(
-    async (token: string) => {
-      const r = await call<DealResult & { order: unknown }>("/api/orders", { method: "POST", body: JSON.stringify({ token }) });
+    async (token: string, model: { direction: "up" | "down" | "flat"; confidence: number; source: string } | null) => {
+      const r = await call<DealResult & { order: unknown }>("/api/orders", { method: "POST", body: JSON.stringify({ token, model }) });
       await reload();
       return r;
     },
@@ -59,7 +59,16 @@ export function useOrders() {
     [reload],
   );
 
-  return { state, error, reload, preview, send, close };
+  const moveStop = useCallback(
+    async (dealId: string, stop: number) => {
+      const r = await call<DealResult & { stop: number }>(`/api/orders/${encodeURIComponent(dealId)}`, { method: "PATCH", body: JSON.stringify({ stop }) });
+      await reload();
+      return r;
+    },
+    [reload],
+  );
+
+  return { state, error, reload, preview, send, close, moveStop };
 }
 
 export type Orders = ReturnType<typeof useOrders>;

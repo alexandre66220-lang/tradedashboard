@@ -328,3 +328,9 @@ code { overflow-wrap: anywhere; }
 .order-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
 .order-close { min-width: 88px; }
 .order-close.armed { background: var(--down); border: 0; border-radius: 6px; color: #fff; font-weight: 600; cursor: pointer; min-height: 38px; }
+.order-list li { flex-wrap: wrap; }
+.order-stop { flex: 1 1 100%; display: flex; gap: 6px; align-items: center; }
+.order-stop .rc-input { flex: 1 1 auto; min-width: 0; }
+.order-stop button { white-space: nowrap; }
+.order-stop .order-close.armed { min-width: 0; padding: 4px 10px; min-height: 32px; }
+.order-badge { margin-left: 6px; vertical-align: middle; }

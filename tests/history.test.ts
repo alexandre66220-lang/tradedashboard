@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetCapitalState, __setRateLimitWait, getCandles, getHistory, toCandles } from "@/lib/capital";
 import { enrichRequest } from "@/lib/forecast/enrich";
-import { INSTRUMENTS } from "@/config/instruments";
+import { INSTRUMENTS, relatedEpics } from "@/config/instruments";
 
 const STEP = 300;
 const END = 1_700_000_100 - (1_700_000_100 % STEP);
@@ -176,7 +176,8 @@ describe("enrichRequest", () => {
     expect(out.candles.length).toBeGreaterThan(1000);
     expect(out.candles.at(-1)?.time).toBe(END);
     expect(out.candles.find((c) => c.time === END)?.close).toBe(1); // the chart's candle wins over the cached history
-    expect(out.context?.map((c) => c.epic).sort()).toEqual(INSTRUMENTS.filter((i) => i.epic !== "GOLD").map((i) => i.epic).sort());
+    expect(out.context?.map((c) => c.epic).sort()).toEqual([...relatedEpics("GOLD")].sort());
+    expect(out.context!.length).toBeLessThanOrEqual(4); // the ML service refuses more than 4 series
     expect(out.context?.every((c) => c.time.length === c.close.length && c.time.length > 1000)).toBe(true);
   });
 

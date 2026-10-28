@@ -1,5 +1,5 @@
 import "server-only";
-import { INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
+import { relatedEpics, spreadBpsFor } from "@/config/instruments";
 import { getHistory } from "@/lib/capital";
 import type { ForecastRequest } from "./types";
 
@@ -15,7 +15,7 @@ export async function enrichRequest(req: ForecastRequest): Promise<ForecastReque
   const out: ForecastRequest = { ...req, spreadBps: spreadBpsFor(req.epic) };
   const target = HISTORY_TARGET[req.resolution] ?? 1000;
   try {
-    const others = INSTRUMENTS.filter((i) => i.epic !== req.epic);
+    const others = relatedEpics(req.epic).map((epic) => ({ epic }));
     const [own, ...ctx] = await Promise.all([
       getHistory(req.epic, req.resolution, target),
       ...others.map((i) => getHistory(i.epic, req.resolution, target).catch(() => null)),

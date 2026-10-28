@@ -14,15 +14,33 @@ export interface Instrument extends NewsProfile {
    * broker's real rates (they differ by instrument, direction and the weekend) and adjust.
    */
   financingBpsPerDay?: number;
+  /**
+   * Epics whose prices the ML model also looks at (at most 4: the service refuses more). Default: the first four other
+   * instruments. Closely related markets help (e.g. the dollar for gold, the S&P 500 for the Nasdaq).
+   */
+  related?: string[];
   // newsCurrencies / newsKeywords (from NewsProfile): which economic announcements matter for this instrument
 }
 
 // Add one line per instrument. The selector appears in the UI as soon as there are 2+.
 export const INSTRUMENTS: Instrument[] = [
-  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2, financingBpsPerDay: 2, newsCurrencies: ["USD"] },
-  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5, financingBpsPerDay: 3, newsCurrencies: ["USD"], newsKeywords: ["crude", "opec"] },
-  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8, financingBpsPerDay: 5, newsCurrencies: ["USD"] },
+  { name: "Or (XAU/USD)", epic: "GOLD", defaultHorizon: 30, spreadBps: 2, financingBpsPerDay: 2, newsCurrencies: ["USD"], related: ["EURUSD", "US500", "OIL_CRUDE", "BTCUSD"] },
+  { name: "Pétrole (WTI)", epic: "OIL_CRUDE", defaultHorizon: 30, spreadBps: 5, financingBpsPerDay: 3, newsCurrencies: ["USD"], newsKeywords: ["crude", "opec"], related: ["GOLD", "US500", "EURUSD", "BTCUSD"] },
+  { name: "Bitcoin (BTC/USD)", epic: "BTCUSD", defaultHorizon: 30, spreadBps: 8, financingBpsPerDay: 5, newsCurrencies: ["USD"], related: ["US100", "US500", "GOLD", "EURUSD"] },
+  // Epics as named by Capital.com (check them with /api/v1/markets?searchTerm=...). Costs are assumptions: adjust to your real spread.
+  { name: "Nasdaq 100 (US100)", epic: "US100", defaultHorizon: 30, spreadBps: 1.5, financingBpsPerDay: 2, newsCurrencies: ["USD"], related: ["US500", "BTCUSD", "GOLD", "EURUSD"] },
+  { name: "S&P 500 (US500)", epic: "US500", defaultHorizon: 30, spreadBps: 1, financingBpsPerDay: 2, newsCurrencies: ["USD"], related: ["US100", "OIL_CRUDE", "GOLD", "EURUSD"] },
+  { name: "Euro / Dollar (EUR/USD)", epic: "EURUSD", defaultHorizon: 30, spreadBps: 0.8, financingBpsPerDay: 1, newsCurrencies: ["USD", "EUR"], related: ["GOLD", "US500", "OIL_CRUDE", "US100"] },
 ];
+
+/** The instruments the ML model gets as context for `epic`: its `related` list, else the first others (never more than 4). */
+export function relatedEpics(epic: string): string[] {
+  const self = INSTRUMENTS.find((i) => i.epic === epic);
+  const known = new Set(INSTRUMENTS.map((i) => i.epic));
+  const chosen = (self?.related ?? []).filter((e) => e !== epic && known.has(e));
+  const rest = INSTRUMENTS.map((i) => i.epic).filter((e) => e !== epic && !chosen.includes(e));
+  return [...chosen, ...rest].slice(0, 4);
+}
 
 export const RESOLUTIONS = {
   "1": { api: "MINUTE", minutes: 1, label: "1m" },

@@ -5,6 +5,8 @@ const positions = vi.fn();
 const open = vi.fn();
 const confirmation = vi.fn();
 const close = vi.fn();
+const amend = vi.fn();
+const closeInfo = vi.fn();
 
 vi.mock("@/lib/capital", async (orig) => {
   const real = await orig<typeof import("@/lib/capital")>();
@@ -15,11 +17,16 @@ vi.mock("@/lib/capital", async (orig) => {
     openPosition: (...a: unknown[]) => open(...a),
     getConfirmation: (...a: unknown[]) => confirmation(...a),
     closePositionDeal: (...a: unknown[]) => close(...a),
+    amendPositionStop: (...a: unknown[]) => amend(...a),
+    getCloseInfo: (...a: unknown[]) => closeInfo(...a),
   };
 });
 
-import { assertDemoOnly, parsePositions, type OpenPosition } from "@/lib/capital";
-import { assessOrder, LIMITS, ordersState, parseOrder, placeOrder, previewOrder, readRecap, __resetOrders, __setConfirmWait, closeOrder, type Order } from "@/lib/orders";
+import { assertDemoOnly, parseCloseActivity, parsePositions, type OpenPosition } from "@/lib/capital";
+import { relatedEpics, INSTRUMENTS } from "@/config/instruments";
+import { readTrades, updateTrades } from "@/lib/trades-store";
+import { __resetMemoryStorage } from "@/lib/journal/storage";
+import { assessOrder, assessStopMove, LIMITS, moveStop, ordersState, parseModel, parseOrder, placeOrder, previewOrder, readRecap, syncDemoTrades, __resetOrders, __setConfirmWait, closeOrder, type Order } from "@/lib/orders";
 import { crossOriginRefused, sameOrigin } from "@/lib/http";
 
 const NOW = 1_800_000_000_000;
@@ -121,6 +128,13 @@ describe("order service", () => {
     vi.stubEnv("CAPITAL_ENV", "demo");
     vi.stubEnv("CAPITAL_BASE_URL", "");
     vi.stubEnv("DASHBOARD_PASSWORD", "site-password");
+    vi.stubEnv("JOURNAL_STORAGE", "memory");
+    vi.stubEnv("STORAGE_BACKEND", "");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("NETLIFY_BLOBS_CONTEXT", "");
+    __resetMemoryStorage();
+    amend.mockReset().mockResolvedValue("ref3");
+    closeInfo.mockReset().mockResolvedValue(null);
     quote.mockReset().mockResolvedValue(Q);
     positions.mockReset().mockResolvedValue([]);
     open.mockReset().mockResolvedValue("ref1");
@@ -134,7 +148,7 @@ describe("order service", () => {
   it("does nothing while trading is switched off, and never touches the broker", async () => {
     vi.stubEnv("TRADING_ENABLED", "");
     await expect(previewOrder(buy, NOW)).rejects.toThrow(/désactivés/);
-    await expect(placeOrder("x", NOW)).rejects.toThrow(/désactivés/);
+    await expect(placeOrder("x", null, NOW)).rejects.toThrow(/désactivés/);
     expect(await ordersState()).toMatchObject({ enabled: false, reason: "off" });
     expect(quote).not.toHaveBeenCalled();
     expect(positions).not.toHaveBeenCalled();
@@ -162,14 +176,14 @@ describe("order service", () => {
 
   it("sends the order once the recap is confirmed, with the stop and the target", async () => {
     const r = await previewOrder(buy, NOW);
-    const res = await placeOrder(r.token, NOW + 5_000);
+    const res = await placeOrder(r.token, null, NOW + 5_000);
     expect(res).toMatchObject({ status: "accepted", dealId: "deal9", level: 2650.5 });
     expect(open).toHaveBeenCalledWith({ epic: "GOLD", direction: "BUY", size: 1, stopLevel: 2640, profitLevel: 2670 });
   });
 
   it("sends a sell as SELL, without target when there is none", async () => {
     const r = await previewOrder({ ...sell, target: null }, NOW);
-    await placeOrder(r.token, NOW + 1_000);
+    await placeOrder(r.token, null, NOW + 1_000);
     expect(open).toHaveBeenCalledWith({ epic: "GOLD", direction: "SELL", size: 1, stopLevel: 2660 });
   });
 
@@ -177,9 +191,9 @@ describe("order service", () => {
     const r = await previewOrder(buy, NOW);
     const [body, sig] = r.token.split(".");
     const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, "base64url").toString()), o: { ...buy, size: 50 } })).toString("base64url");
-    await expect(placeOrder(`${forged}.${sig}`, NOW + 1_000)).rejects.toThrow(/invalide/);
-    await expect(placeOrder(r.token, NOW + LIMITS.tokenTtlMs + 1)).rejects.toThrow(/expirée/);
-    await expect(placeOrder(undefined, NOW)).rejects.toThrow(/invalide/);
+    await expect(placeOrder(`${forged}.${sig}`, null, NOW + 1_000)).rejects.toThrow(/invalide/);
+    await expect(placeOrder(r.token, null, NOW + LIMITS.tokenTtlMs + 1)).rejects.toThrow(/expirée/);
+    await expect(placeOrder(undefined, null, NOW)).rejects.toThrow(/invalide/);
     expect(await readRecap(r.token, NOW + 1)).not.toBeNull();
     expect(open).not.toHaveBeenCalled();
   });
@@ -187,40 +201,40 @@ describe("order service", () => {
   it("refuses a recap signed with another password", async () => {
     const r = await previewOrder(buy, NOW);
     vi.stubEnv("DASHBOARD_PASSWORD", "another");
-    await expect(placeOrder(r.token, NOW + 1_000)).rejects.toThrow(/invalide/);
+    await expect(placeOrder(r.token, null, NOW + 1_000)).rejects.toThrow(/invalide/);
   });
 
   it("sends a recap only once", async () => {
     const r = await previewOrder(buy, NOW);
-    await placeOrder(r.token, NOW + 1_000);
-    await expect(placeOrder(r.token, NOW + 2_000)).rejects.toThrow(/déjà/);
+    await placeOrder(r.token, null, NOW + 1_000);
+    await expect(placeOrder(r.token, null, NOW + 2_000)).rejects.toThrow(/déjà/);
     expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("refuses when the price moved too far since the recap", async () => {
     const r = await previewOrder(buy, NOW);
     quote.mockResolvedValue({ status: "TRADEABLE", bid: 2660, offer: 2660.5 });
-    await expect(placeOrder(r.token, NOW + 1_000)).rejects.toThrow(/prix a bougé/);
+    await expect(placeOrder(r.token, null, NOW + 1_000)).rejects.toThrow(/prix a bougé/);
     expect(open).not.toHaveBeenCalled();
   });
 
   it("re-checks the limits just before sending", async () => {
     const r = await previewOrder(buy, NOW);
     positions.mockResolvedValue([pos({ dealId: "a" }), pos({ dealId: "b" }), pos({ dealId: "c" })]);
-    await expect(placeOrder(r.token, NOW + 1_000)).rejects.toThrow(/positions ouvertes/);
+    await expect(placeOrder(r.token, null, NOW + 1_000)).rejects.toThrow(/positions ouvertes/);
     expect(open).not.toHaveBeenCalled();
   });
 
   it("reports a refusal from the broker", async () => {
     confirmation.mockResolvedValue({ dealReference: "ref1", accepted: false, reason: "INSUFFICIENT_FUNDS", dealId: null, level: null });
     const r = await previewOrder(buy, NOW);
-    expect(await placeOrder(r.token, NOW + 1_000)).toMatchObject({ status: "rejected", reason: "INSUFFICIENT_FUNDS" });
+    expect(await placeOrder(r.token, null, NOW + 1_000)).toMatchObject({ status: "rejected", reason: "INSUFFICIENT_FUNDS" });
   });
 
   it("says the outcome is unknown when the confirmation cannot be read, instead of guessing", async () => {
     confirmation.mockRejectedValue(new Error("down"));
     const r = await previewOrder(buy, NOW);
-    expect(await placeOrder(r.token, NOW + 1_000)).toMatchObject({ status: "unknown" });
+    expect(await placeOrder(r.token, null, NOW + 1_000)).toMatchObject({ status: "unknown" });
     expect(confirmation).toHaveBeenCalledTimes(4);
   });
 
@@ -257,5 +271,204 @@ describe("same origin", () => {
     expect(sameOrigin(req(null))).toBe(false);
     expect(sameOrigin(req("nonsense"))).toBe(false);
     expect(crossOriginRefused().status).toBe(403);
+  });
+});
+
+const MODEL = { direction: "up", confidence: 0.62, source: "ML v2" };
+
+describe("noting orders in Mes trades", () => {
+  beforeEach(() => {
+    vi.stubEnv("TRADING_ENABLED", "true");
+    vi.stubEnv("CAPITAL_ENV", "demo");
+    vi.stubEnv("CAPITAL_BASE_URL", "");
+    vi.stubEnv("DASHBOARD_PASSWORD", "site-password");
+    vi.stubEnv("JOURNAL_STORAGE", "memory");
+    vi.stubEnv("STORAGE_BACKEND", "");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("NETLIFY_BLOBS_CONTEXT", "");
+    __resetMemoryStorage();
+    __resetOrders();
+    __setConfirmWait(1);
+    quote.mockReset().mockResolvedValue(Q);
+    positions.mockReset().mockResolvedValue([]);
+    open.mockReset().mockResolvedValue("ref1");
+    confirmation.mockReset().mockResolvedValue({ dealReference: "ref1", accepted: true, reason: null, dealId: "deal9", level: 2650.5 });
+    close.mockReset().mockResolvedValue("ref2");
+    amend.mockReset().mockResolvedValue("ref3");
+    closeInfo.mockReset().mockResolvedValue(null);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const placed = async () => {
+    const r = await previewOrder(buy, NOW);
+    return placeOrder(r.token, MODEL, NOW + 1_000);
+  };
+
+  it("writes the executed order as a demo trade with the forecast of the moment", async () => {
+    const res = await placed();
+    expect(res.logged).toBe(true);
+    const trades = (await readTrades())!;
+    expect(trades).toHaveLength(1);
+    expect(trades[0]).toMatchObject({ epic: "GOLD", side: "long", entry: 2650.5, size: 1, stop: 2640, target: 2670, dealId: "deal9", demo: true, model: MODEL });
+  });
+
+  it("keeps an unusable forecast out of the trade, and still logs it", async () => {
+    const r = await previewOrder(buy, NOW);
+    await placeOrder(r.token, { direction: "sideways", confidence: "x" }, NOW + 1_000);
+    expect((await readTrades())![0].model).toBeNull();
+    expect(parseModel({ direction: "down", confidence: 0.5, source: "x".repeat(200) })?.source).toHaveLength(80);
+    expect(parseModel(null)).toBeNull();
+  });
+
+  it("does not log a refused order", async () => {
+    confirmation.mockResolvedValue({ dealReference: "ref1", accepted: false, reason: "NO", dealId: null, level: null });
+    const r = await previewOrder(buy, NOW);
+    expect((await placeOrder(r.token, MODEL, NOW + 1_000)).logged).toBe(false);
+    expect(await readTrades()).toEqual([]);
+  });
+
+  it("closes the trade at the confirmed price when the position is closed from the dashboard", async () => {
+    await placed();
+    confirmation.mockResolvedValue({ dealReference: "ref2", accepted: true, reason: null, dealId: "deal9", level: 2655 });
+    await closeOrder("deal9");
+    expect((await readTrades())![0]).toMatchObject({ exit: 2655 });
+    expect((await readTrades())![0].closedAt).toBeGreaterThan(0);
+  });
+
+  it("moves the stop, keeps the target, and records the new stop without touching the original one", async () => {
+    await placed();
+    positions.mockResolvedValue([pos({ dealId: "deal9", level: 2650.5, stopLevel: 2640, profitLevel: 2670, createdAt: NOW - 10 * 60_000 })]);
+    quote.mockResolvedValue({ status: "TRADEABLE", bid: 2660, offer: 2660.5 });
+    const res = await moveStop("deal9", 2650.5);
+    expect(res).toMatchObject({ status: "accepted", stop: 2650.5 });
+    expect(amend).toHaveBeenCalledWith("deal9", 2650.5, 2670);
+    expect((await readTrades())![0]).toMatchObject({ stop: 2640, stopMoved: 2650.5 });
+  });
+
+  it("refuses to move a stop away from the price, or onto it", async () => {
+    positions.mockResolvedValue([pos({ dealId: "deal9", stopLevel: 2640 })]);
+    quote.mockResolvedValue({ status: "TRADEABLE", bid: 2660, offer: 2660.5 });
+    await expect(moveStop("deal9", 2630)).rejects.toThrow(/resserrer/);
+    await expect(moveStop("deal9", 2660)).rejects.toThrow(/sous le prix/);
+    await expect(moveStop("deal9", Number.NaN)).rejects.toThrow(/invalide/);
+    await expect(moveStop("nope", 2650)).rejects.toThrow(/introuvable/);
+    expect(amend).not.toHaveBeenCalled();
+  });
+
+  it("never moves a stop on the live account", async () => {
+    vi.stubEnv("CAPITAL_ENV", "live");
+    await expect(moveStop("deal9", 2650)).rejects.toThrow(/démo/);
+    expect(amend).not.toHaveBeenCalled();
+  });
+});
+
+describe("assessStopMove", () => {
+  const q = { status: "TRADEABLE", bid: 100, offer: 100.2 };
+  it("only lets a stop get closer to the price, on the right side, clear of the spread", () => {
+    expect(assessStopMove({ side: "long", currentStop: 95, newStop: 99 }, q).ok).toBe(true);
+    expect(assessStopMove({ side: "long", currentStop: 95, newStop: 94 }, q).ok).toBe(false);
+    expect(assessStopMove({ side: "long", currentStop: 95, newStop: 99.9 }, q).ok).toBe(false);
+    expect(assessStopMove({ side: "long", currentStop: null, newStop: 90 }, q).ok).toBe(true);
+    expect(assessStopMove({ side: "short", currentStop: 105, newStop: 101 }, q).ok).toBe(true);
+    expect(assessStopMove({ side: "short", currentStop: 105, newStop: 106 }, q).ok).toBe(false);
+    expect(assessStopMove({ side: "short", currentStop: 105, newStop: 100.3 }, q).ok).toBe(false);
+    expect(assessStopMove({ side: "long", currentStop: 95, newStop: 99 }, { ...q, status: "CLOSED" }).ok).toBe(false);
+  });
+});
+
+describe("parseCloseActivity", () => {
+  const act = (id: string, level: number, dateUTC = "2026-10-28T10:00:00") => ({ dateUTC, dealId: id, details: { level, actions: [{ actionType: "POSITION_CLOSED", affectedDealId: id }] } });
+  it("finds the closing level of one deal, the latest if there are several", () => {
+    expect(parseCloseActivity({ activities: [act("a", 10), act("b", 20), act("b", 21, "2026-10-28T11:00:00")] }, "b")).toEqual({ level: 21, at: Date.UTC(2026, 9, 28, 11, 0, 0) });
+  });
+  it("ignores openings, other deals and anything that does not look right", () => {
+    expect(parseCloseActivity({ activities: [{ dealId: "a", details: { level: 10, actions: [{ actionType: "POSITION_OPENED", affectedDealId: "a" }] } }] }, "a")).toBeNull();
+    expect(parseCloseActivity({ activities: [act("a", 10)] }, "z")).toBeNull();
+    expect(parseCloseActivity({ activities: [act("a", -1)] }, "a")).toBeNull();
+    expect(parseCloseActivity({ nope: 1 }, "a")).toBeNull();
+    expect(parseCloseActivity(null, "a")).toBeNull();
+  });
+});
+
+describe("syncDemoTrades", () => {
+  beforeEach(() => {
+    vi.stubEnv("CAPITAL_ENV", "demo");
+    vi.stubEnv("CAPITAL_BASE_URL", "");
+    vi.stubEnv("JOURNAL_STORAGE", "memory");
+    vi.stubEnv("STORAGE_BACKEND", "");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("NETLIFY_BLOBS_CONTEXT", "");
+    __resetMemoryStorage();
+    closeInfo.mockReset().mockResolvedValue(null);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const seed = (t: object) =>
+    updateTrades<null>((trades) => ({ trades: [...trades, { id: "t1", epic: "GOLD", side: "long", openedAt: NOW - 3_600_000, entry: 2650, size: 1, stop: 2640, target: 2670, model: null, dealId: "d1", demo: true, ...t }] as never, result: null }));
+
+  it("does nothing when everything matches", async () => {
+    await seed({});
+    expect(await syncDemoTrades(NOW, [pos({ dealId: "d1", stopLevel: 2640 })])).toBe(0);
+  });
+
+  it("closes a trade whose position is gone, at the price of the account activity", async () => {
+    await seed({});
+    closeInfo.mockResolvedValue({ level: 2640, at: NOW - 60_000 });
+    expect(await syncDemoTrades(NOW, [])).toBe(1);
+    expect((await readTrades())![0]).toMatchObject({ exit: 2640, closedAt: NOW - 60_000 });
+  });
+
+  it("does not guess the price when the activity does not give it: it flags the trade instead, once", async () => {
+    await seed({});
+    expect(await syncDemoTrades(NOW, [])).toBe(1);
+    const t = (await readTrades())![0];
+    expect(t.exit).toBeUndefined();
+    expect(t.brokerClosed).toBe(NOW);
+    expect(await syncDemoTrades(NOW + 1000, [])).toBe(0);
+    closeInfo.mockResolvedValue({ level: 2671, at: null });
+    expect(await syncDemoTrades(NOW + 2000, [])).toBe(1); // the price shows up later
+    expect((await readTrades())![0]).toMatchObject({ exit: 2671 });
+  });
+
+  it("adopts a demo position nobody noted, without inventing a stop on the wrong side", async () => {
+    expect(await syncDemoTrades(NOW, [pos({ dealId: "x1", level: 100, stopLevel: 101, profitLevel: 120 })])).toBe(1);
+    const t = (await readTrades())![0];
+    expect(t).toMatchObject({ dealId: "x1", demo: true, side: "long", entry: 100, target: 120, stopMoved: 101, model: null });
+    expect(t.stop).toBeUndefined();
+    expect(await syncDemoTrades(NOW, [pos({ dealId: "x1", level: 100, stopLevel: 101 })])).toBe(0); // not adopted twice
+  });
+
+  it("ignores positions on instruments the dashboard does not follow", async () => {
+    expect(await syncDemoTrades(NOW, [pos({ dealId: "x2", epic: "OTHER" })])).toBe(0);
+  });
+
+  it("picks up a stop moved on Capital.com", async () => {
+    await seed({});
+    expect(await syncDemoTrades(NOW, [pos({ dealId: "d1", stopLevel: 2648 })])).toBe(1);
+    expect((await readTrades())![0]).toMatchObject({ stop: 2640, stopMoved: 2648 });
+  });
+
+  it("refuses to run on the live account", async () => {
+    vi.stubEnv("CAPITAL_ENV", "live");
+    await expect(syncDemoTrades(NOW, [])).rejects.toThrow(/démo/);
+  });
+});
+
+describe("related instruments", () => {
+  it("gives the model at most four others, never the instrument itself", () => {
+    for (const i of INSTRUMENTS) {
+      const r = relatedEpics(i.epic);
+      expect(r.length).toBeLessThanOrEqual(4);
+      expect(r).not.toContain(i.epic);
+      expect(new Set(r).size).toBe(r.length);
+    }
+    expect(relatedEpics("GOLD")).toEqual(["EURUSD", "US500", "OIL_CRUDE", "BTCUSD"]);
+  });
+  it("fills with the other instruments when nothing is configured", () => {
+    expect(relatedEpics("UNKNOWN")).toHaveLength(4);
+  });
+  it("follows the three new instruments", () => {
+    const epics = INSTRUMENTS.map((i) => i.epic);
+    expect(epics).toEqual(expect.arrayContaining(["US100", "US500", "EURUSD"]));
   });
 });

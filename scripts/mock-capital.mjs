@@ -9,8 +9,9 @@ const stats = { session: 0, prices: 0, markets: 0, other: 0 };
 
 const positions = new Map();
 const deals = new Map();
+const activities = [];
 
-const BASE = { GOLD: 2650, OIL_CRUDE: 72, BTCUSD: 68000 };
+const BASE = { GOLD: 2650, OIL_CRUDE: 72, BTCUSD: 68000, US100: 21000, US500: 6000, EURUSD: 1.08 };
 
 // The price path is a pure function of (epic, step, candle index), so that pages requested with from / to line up.
 const paths = new Map();
@@ -58,7 +59,7 @@ function series(epic, stepMin, n, fromSec, toSec) {
     if (!r) continue;
     const iso = new Date(k * step * 1000).toISOString().slice(0, 19);
     const spread = base * 0.00006;
-    const q = (v) => ({ bid: +(v - spread).toFixed(3), ask: +(v + spread).toFixed(3) });
+    const q = (v) => ({ bid: +(v - spread).toFixed(5), ask: +(v + spread).toFixed(5) });
     out.push({ snapshotTime: iso, snapshotTimeUTC: iso, openPrice: q(r.open), closePrice: q(r.close), highPrice: q(r.high), lowPrice: q(r.low), lastTradedVolume: r.volume });
   }
   return out;
@@ -67,8 +68,8 @@ function series(epic, stepMin, n, fromSec, toSec) {
 // Current quote: follows the last 5-minute candle (the chart default) so that levels taken from the chart make sense
 const quoteOf = (epic) => {
   const mid = BASE[epic] ? pathFor(epic, 5).price : 2650;
-  const spread = Number(process.env.MOCK_SPREAD || 0.3);
-  return { bid: +(mid - spread / 2).toFixed(3), offer: +(mid + spread / 2).toFixed(3) };
+  const spread = Number(process.env.MOCK_SPREAD || (BASE[epic] || 2650) * 0.00011);
+  return { bid: +(mid - spread / 2).toFixed(5), offer: +(mid + spread / 2).toFixed(5) };
 };
 
 const send = (res, status, body, headers = {}) => {
@@ -96,6 +97,15 @@ http.createServer((req, res) => {
   }
   if (url.pathname === "/ff_calendar_nextweek.json") return send(res, 404, {});
   if (req.headers["x-cap-api-key"] !== "test-key") return send(res, 401, { errorCode: "error.invalid.api.key" });
+  if (url.pathname === "/__close") {
+    // Tests only: the broker closes a position by itself (stop or target hit) and logs it in the activity
+    const id = url.searchParams.get("dealId");
+    const level = Number(url.searchParams.get("level"));
+    if (!positions.has(id)) return send(res, 404, {});
+    positions.delete(id);
+    activities.push({ dateUTC: new Date().toISOString().slice(0, 19), dealId: id, details: { level, actions: [{ actionType: "POSITION_CLOSED", affectedDealId: id }] } });
+    return send(res, 200, { closed: id });
+  }
   if (req.method === "POST" && url.pathname === "/api/v1/session") {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -116,7 +126,7 @@ http.createServer((req, res) => {
   let m;
   if (req.method === "GET" && url.pathname === "/api/v1/clientsentiment") {
     if (process.env.MOCK_SENT_BAD) return send(res, 404, { errorCode: "error.not-found" });
-    const known = { GOLD: 72, OIL_CRUDE: 41, BTCUSD: 55 };
+    const known = { GOLD: 72, OIL_CRUDE: 41, BTCUSD: 55, US100: 63, US500: 58, EURUSD: 47 };
     const ids = (url.searchParams.get("marketIds") || "").split(",").filter((i) => known[i]);
     return send(res, 200, { clientSentiments: ids.map((id) => ({ marketId: id, longPositionPercentage: known[id], shortPositionPercentage: 100 - known[id] })) });
   }
@@ -159,6 +169,25 @@ http.createServer((req, res) => {
         positions.set(dealId, { dealId, ref, epic: b.epic, size: b.size, direction: b.direction, level, stopLevel: b.stopLevel, profitLevel: b.profitLevel, created: new Date().toISOString().slice(0, 23) });
         deals.set(ref, { dealStatus: "ACCEPTED", dealId, level });
       }
+      send(res, 200, { dealReference: ref });
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/history/activity" && req.method === "GET") {
+    if (process.env.MOCK_NO_ACTIVITY) return send(res, 200, { activities: [] });
+    return send(res, 200, { activities });
+  }
+  if ((m = url.pathname.match(/^\/api\/v1\/positions\/(.+)$/)) && req.method === "PUT") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const p = positions.get(m[1]);
+      if (!p) return send(res, 404, { errorCode: "error.not-found.dealId" });
+      const b = JSON.parse(body || "{}");
+      if (typeof b.stopLevel === "number") p.stopLevel = b.stopLevel;
+      if (typeof b.profitLevel === "number") p.profitLevel = b.profitLevel;
+      const ref = "u_" + Math.random().toString(36).slice(2, 10);
+      deals.set(ref, { dealStatus: "ACCEPTED", dealId: m[1], level: p.level });
       send(res, 200, { dealReference: ref });
     });
     return;
