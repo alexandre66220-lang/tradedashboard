@@ -9,7 +9,7 @@ export type { DealResult, OrdersState, Recap };
 type ApiError = { error?: { message?: string } };
 const messageOf = (body: unknown, fallback: string) => (body as ApiError | null)?.error?.message ?? fallback;
 
-async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; body: T } | { ok: false; error: string }> {
+async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; body: T } | { ok: false; error: string; code?: string }> {
   try {
     const res = await fetch(url, { cache: "no-store", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
     if (res.status === 401) {
@@ -18,7 +18,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; bod
     }
     const body = await readJson<T>(res);
     if (body === null) return { ok: false, error: unexpectedResponse(res).message };
-    return res.ok ? { ok: true, body } : { ok: false, error: messageOf(body, `Erreur (HTTP ${res.status}).`) };
+    return res.ok ? { ok: true, body } : { ok: false, error: messageOf(body, `Erreur (HTTP ${res.status}).`), code: (body as { error?: { code?: string } } | null)?.error?.code };
   } catch {
     return { ok: false, error: "Serveur injoignable." };
   }
@@ -41,7 +41,7 @@ export function useOrders() {
     reload();
   }, [reload]);
 
-  const preview = useCallback((order: { epic: string; side: "long" | "short"; size: number; stop: number; target?: number }) => call<Recap>("/api/orders/preview", { method: "POST", body: JSON.stringify(order) }), []);
+  const preview = useCallback((order: { epic: string; side: "long" | "short"; size: number; stop: number; target?: number; ackNews?: boolean }) => call<Recap>("/api/orders/preview", { method: "POST", body: JSON.stringify(order) }), []);
   const send = useCallback(
     async (token: string, model: { direction: "up" | "down" | "flat"; confidence: number; source: string } | null) => {
       const r = await call<DealResult & { order: unknown }>("/api/orders", { method: "POST", body: JSON.stringify({ token, model }) });

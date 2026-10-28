@@ -53,11 +53,13 @@ export interface JournalEntry {
 
 /** ml2 = ML with volume / other instruments / cost target (source "ML v2…"), ml = the first ML version, builtin = regression in the app */
 export const MODEL_FAMILIES = ["ml2", "ml", "builtin"] as const;
+/** Real sessions (see lib/sessions.ts): the hours follow the opening times of Tokyo, London and New York, summer time included */
 export const SESSIONS = [
-  { key: "asia", label: "Asie", from: 0, to: 7 },
-  { key: "europe", label: "Europe", from: 7, to: 13 },
-  { key: "us", label: "New York", from: 13, to: 21 },
-  { key: "night", label: "Nuit", from: 21, to: 24 },
+  { key: "asia", label: "Asie (Tokyo seul)" },
+  { key: "europe", label: "Europe (Londres seul)" },
+  { key: "overlap", label: "Londres + New York" },
+  { key: "us", label: "New York seul" },
+  { key: "night", label: "Hors séances (nuit, week-end)" },
 ] as const;
 export type SessionKey = (typeof SESSIONS)[number]["key"];
 

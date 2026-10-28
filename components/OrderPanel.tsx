@@ -45,6 +45,8 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, model,
   // Stop to move to, per open position (text), and the position whose move was armed with a first tap
   const [stopText, setStopText] = useState<Record<string, string>>({});
   const [armedStop, setArmedStop] = useState<string | null>(null);
+  // The order was refused because of an announcement: the owner may go ahead knowingly
+  const [newsBlock, setNewsBlock] = useState(false);
 
   // Levels belong to one instrument: start again when another one is shown
   useEffect(() => {
@@ -123,15 +125,17 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, model,
   const expired = recap !== null && now >= recap.expiresAt;
   const positions = state.positions ?? [];
 
-  async function verify() {
+  async function verify(ackNews = false) {
     setBusy(true);
     setError(null);
+    setNewsBlock(false);
     setResult(null);
     const s = num(size), st = num(stop), tg = target.trim() === "" ? undefined : num(target);
-    const r = await orders.preview({ epic, side, size: s, stop: st, ...(tg !== undefined ? { target: tg } : {}) });
+    const r = await orders.preview({ epic, side, size: s, stop: st, ...(tg !== undefined ? { target: tg } : {}), ...(ackNews ? { ackNews: true } : {}) });
     setBusy(false);
     if (!r.ok) {
       setRecap(null);
+      setNewsBlock(r.code === "NEWS_WINDOW");
       return setError(r.error);
     }
     setNow(Date.now());
@@ -210,11 +214,16 @@ export default function OrderPanel({ orders, epic, decimals, last, draft, model,
       </div>
 
       {!recap && (
-        <button className="sl-apply" disabled={busy} onClick={verify}>
+        <button className="sl-apply" disabled={busy} onClick={() => verify()}>
           {busy ? "Vérification…" : "Vérifier l’ordre"}
         </button>
       )}
       {error && <p className="rc-warn">{error}</p>}
+      {newsBlock && !recap && (
+        <button className="ghost order-cancel" disabled={busy} onClick={() => verify(true)}>
+          J’ai vu l’annonce : passer outre et vérifier
+        </button>
+      )}
 
       {recap && (
         <div className="order-recap">

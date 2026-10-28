@@ -156,6 +156,17 @@ Panneau « Positionnement du marché » (onglet Prévision) et lignes dans le jo
 - **Écartées, et pourquoi** : sources de prix (CoinGecko, CoinCap, Goldprice…) redondantes avec Capital.com ; taux de change quotidiens (Frankfurter) remplacés par l'Euro/Dollar de Capital.com en 5 minutes ; rendements du Trésor, macro (Econdb, Helious) et ETF (TickerInside) quotidiens ou mensuels, sans lien démontré avec un mouvement de 30 minutes ; horaires de séance (Futures Clock) déjà couverts par l'état du marché et le découpage par session du journal ; mempool et stablecoins (on-chain) trop lents ; Reddit trop bruité.
 - `OKX_BASE_URL` et `CFTC_URL` ne servent qu'aux tests locaux avec le faux serveur (`scripts/mock-capital.mjs`).
 
+### Séances réelles et horloge des marchés
+
+- **Séances** (`lib/sessions.ts`) : calculées à partir des heures d'ouverture locales de Tokyo (9 h – 15 h 30), Londres (8 h – 16 h 30) et New York (9 h 30 – 16 h), avec le fuseau horaire de chaque place (donc le changement d'heure, qui n'a pas lieu aux mêmes dates en Europe et aux États-Unis : du 25 octobre au 1er novembre 2026, par exemple, l'écart Paris / New York est de 5 h et non de 6 h). Cinq séances : Tokyo seul, Londres seul, Londres + New York (les heures les plus actives), New York seul, hors séances (nuit, week-end). Les jours fériés ne sont pas connus ; l'état du marché vient de Capital.com. Le journal des prévisions classe chaque prévision selon cette séance (avant, des tranches fixes en heures UTC, fausses une partie de l'année).
+- **Panneau « Horloge des marchés »** (onglet Prévision) : ouvert / fermé pour chaque place, prochaine ouverture ou fermeture à l'heure de l'appareil, séance en cours, écart Paris / New York et date de son prochain changement.
+
+### Annonces économiques et ordres
+
+- Le calendrier (déjà présent : inflation, emploi, taux…) protège aussi les ordres démo : **pas d'ordre de 30 minutes avant à 15 minutes après une annonce majeure** qui concerne l'instrument. L'ordre est refusé avec la raison ; « J'ai vu l'annonce : passer outre et vérifier » permet de continuer en connaissance de cause, et le récapitulatif le rappelle. La règle est revérifiée juste avant l'envoi (une annonce qui apparaît entre-temps arrête un ordre non confirmé). Une annonce plus lointaine (jusqu'à 90 min) ajoute un avertissement « envisagez une taille réduite ». Si le calendrier est injoignable, l'ordre reste possible avec un avertissement.
+- Le calculateur de risque affiche la même mise en garde (réduire la taille de moitié ou attendre) quand une annonce majeure approche.
+- **Écartées** : jours fériés (Nager.Date, The Calendar) : le statut du marché de Capital.com dit déjà si un marché est fermé ; actualités RSS (Noozra) : il faudrait noter chaque titre avec un modèle de langage, et rien ne permet aujourd'hui de mesurer si ça aiderait.
+
 ### Feu « pas de trade maintenant »
 
 Pastille sous le prix, toujours informative (rien n'est bloqué) :

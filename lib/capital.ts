@@ -33,6 +33,7 @@ export type CapitalErrorCode =
   | "RATE_LIMITED"
   | "UPSTREAM_UNREACHABLE"
   | "TRADING_REFUSED"
+  | "NEWS_WINDOW"
   | "UNKNOWN_EPIC"
   | "NO_DATA"
   | "UPSTREAM_ERROR";

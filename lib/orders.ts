@@ -1,5 +1,7 @@
 import "server-only";
 import { INSTRUMENTS } from "@/config/instruments";
+import { relevantEvents, type RelevantEvent } from "./calendar";
+import { getCalendar } from "./calendar-source";
 import type { Trade, TradeModel } from "./trades";
 import { readTrades, updateTrades } from "./trades-store";
 import { hmacHex, timingSafeEqualStr } from "./auth";
@@ -46,9 +48,18 @@ export interface Order {
   size: number;
   stop: number;
   target: number | null;
+  /** The owner saw the announcement around this moment and wants the order anyway */
+  ackNews?: true;
 }
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+/** `news` is set when the order is refused because of an announcement (the owner may go ahead knowingly). */
+export type Assessed = { ok: true; value: Plan } | { ok: false; error: string; news?: true };
+
+/** A major announcement this close before, or just after, makes the price jump: no new order unless it is acknowledged. */
+export const NEWS_BLOCK_BEFORE_MIN = 30;
+export const NEWS_BLOCK_AFTER_MIN = 15;
+export const NEWS_WARN_BEFORE_MIN = 90;
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
@@ -64,7 +75,10 @@ export function parseOrder(body: unknown, epics: string[] = INSTRUMENTS.map((i) 
   const target = b.target === undefined || b.target === null || b.target === "" ? null : num(b.target);
   if (target !== null && target <= 0) return { ok: false, error: "Objectif invalide (niveau de prix)." };
   if (b.target !== undefined && b.target !== null && b.target !== "" && target === null) return { ok: false, error: "Objectif invalide (niveau de prix)." };
-  return { ok: true, value: { epic: b.epic, side: b.side, size: round(size, 2), stop: round(stop, 6), target: target === null ? null : round(target, 6) } };
+  return {
+    ok: true,
+    value: { epic: b.epic, side: b.side, size: round(size, 2), stop: round(stop, 6), target: target === null ? null : round(target, 6), ...(b.ackNews === true ? { ackNews: true as const } : {}) },
+  };
 }
 
 export interface Plan {
@@ -86,7 +100,7 @@ export interface QuoteLike {
 }
 
 /** All the checks that do not need the network: the same ones are run at the recap and again just before sending. */
-export function assessOrder(order: Order, quote: QuoteLike, positions: OpenPosition[], now: number): Parsed<Plan> {
+export function assessOrder(order: Order, quote: QuoteLike, positions: OpenPosition[], now: number, news?: RelevantEvent[] | null): Assessed {
   if (quote.status !== "TRADEABLE") return { ok: false, error: "Le marché n'est pas ouvert à la négociation pour l'instant." };
   if (quote.bid === null || quote.offer === null || quote.offer < quote.bid) return { ok: false, error: "Pas de cotation exploitable pour cet instrument." };
   const long = order.side === "long";
@@ -111,10 +125,25 @@ export function assessOrder(order: Order, quote: QuoteLike, positions: OpenPosit
     return { ok: false, error: "Une position identique vient d'être ouverte : ordre refusé pour éviter un doublon." };
   }
 
+  const warnings: string[] = [];
+  // Announcements: undefined = not checked (tests), null = the calendar could not be read
+  if (news === null) warnings.push("Calendrier des annonces injoignable : vérifiez à la main qu'aucune annonce majeure n'approche.");
+  else if (news) {
+    const major = news.filter((e) => e.impact === "high" && e.minutesFromNow >= -NEWS_BLOCK_AFTER_MIN && e.minutesFromNow <= NEWS_BLOCK_BEFORE_MIN);
+    const label = (e: RelevantEvent) => `« ${e.title} » ${e.minutesFromNow >= 0 ? `dans ${Math.round(e.minutesFromNow)} min` : `il y a ${Math.round(-e.minutesFromNow)} min`}`;
+    if (major.length && !order.ackNews) {
+      return { ok: false, news: true, error: `Annonce majeure : ${major.map(label).join(", ")}. Le prix peut sauter dans les deux sens et le stop peut être sauté : pas d'ordre autour de ces moments, sauf si vous passez outre en connaissance de cause.` };
+    }
+    if (major.length) warnings.push(`Vous avez passé outre l'annonce ${major.map(label).join(", ")}.`);
+    else {
+      const soon = news.filter((e) => e.minutesFromNow > NEWS_BLOCK_BEFORE_MIN && e.minutesFromNow <= NEWS_WARN_BEFORE_MIN);
+      if (soon.length) warnings.push(`Annonce à venir : ${soon.map(label).join(", ")}. Envisagez une taille réduite ou d'attendre.`);
+    }
+  }
+
   const risk = order.size * stopDist;
   const reward = order.target === null ? null : order.size * Math.abs(order.target - entry);
   const ratio = reward === null || risk === 0 ? null : reward / risk;
-  const warnings: string[] = [];
   if (order.target === null) warnings.push("Pas d'objectif : la position ne se fermera que sur le stop ou à la main.");
   if (ratio !== null && ratio < 1) warnings.push("L'objectif est plus proche que le stop : il faut gagner plus d'une fois sur deux pour s'en sortir.");
   if (spread > 0.2 * stopDist) warnings.push("Le spread représente plus de 20 % de la distance du stop : coût élevé.");
@@ -175,6 +204,18 @@ export function __setConfirmWait(ms: number) {
 // ---------------------------------------------------------------------------
 // Service
 
+/** Announcements around now that matter for the instrument; null when the calendar cannot be read. */
+async function newsFor(epic: string, now: number): Promise<RelevantEvent[] | null> {
+  const inst = INSTRUMENTS.find((i) => i.epic === epic);
+  if (!inst) return [];
+  try {
+    const { events } = await getCalendar();
+    return relevantEvents(events, inst, now / 1000, -NEWS_BLOCK_AFTER_MIN, NEWS_WARN_BEFORE_MIN);
+  } catch {
+    return null;
+  }
+}
+
 function gate() {
   if (!tradingEnabled()) {
     throw new CapitalError("TRADING_REFUSED", "Les ordres sont désactivés : ajoutez TRADING_ENABLED=true (compte démo) dans les variables du serveur, puis redéployez.", 403);
@@ -215,9 +256,9 @@ export async function previewOrder(body: unknown, now = Date.now()): Promise<Rec
   gate();
   const parsed = parseOrder(body);
   if (!parsed.ok) throw new CapitalError("TRADING_REFUSED", parsed.error, 400);
-  const [quote, positions] = await Promise.all([getFreshQuote(parsed.value.epic), listPositions()]);
-  const plan = assessOrder(parsed.value, quote, positions, now);
-  if (!plan.ok) throw new CapitalError("TRADING_REFUSED", plan.error, 422);
+  const [quote, positions, news] = await Promise.all([getFreshQuote(parsed.value.epic), listPositions(), newsFor(parsed.value.epic, now)]);
+  const plan = assessOrder(parsed.value, quote, positions, now, news);
+  if (!plan.ok) throw new CapitalError(plan.news ? "NEWS_WINDOW" : "TRADING_REFUSED", plan.error, 422);
   const expiresAt = now + LIMITS.tokenTtlMs;
   const token = await signRecap({ o: parsed.value, e: plan.value.entry, x: expiresAt, n: crypto.randomUUID() });
   return { order: parsed.value, plan: plan.value, token, expiresAt };
@@ -263,9 +304,9 @@ export async function placeOrder(token: unknown, model: unknown = null, now = Da
   if (!recap) throw new CapitalError("TRADING_REFUSED", "Confirmation expirée ou invalide : vérifiez l'ordre de nouveau.", 400);
   if (usedNonces.has(recap.n)) throw new CapitalError("TRADING_REFUSED", "Cet ordre a déjà été envoyé.", 409);
 
-  const [quote, positions] = await Promise.all([getFreshQuote(recap.o.epic), listPositions()]);
-  const plan = assessOrder(recap.o, quote, positions, now);
-  if (!plan.ok) throw new CapitalError("TRADING_REFUSED", plan.error, 422);
+  const [quote, positions, news] = await Promise.all([getFreshQuote(recap.o.epic), listPositions(), newsFor(recap.o.epic, now)]);
+  const plan = assessOrder(recap.o, quote, positions, now, news);
+  if (!plan.ok) throw new CapitalError(plan.news ? "NEWS_WINDOW" : "TRADING_REFUSED", plan.error, 422);
   const drift = (Math.abs(plan.value.entry - recap.e) / recap.e) * 100;
   if (drift > LIMITS.maxDriftPct) {
     throw new CapitalError("TRADING_REFUSED", `Le prix a bougé de ${drift.toFixed(2)} % depuis la vérification : vérifiez l'ordre de nouveau.`, 409);

@@ -7,6 +7,8 @@ const confirmation = vi.fn();
 const close = vi.fn();
 const amend = vi.fn();
 const closeInfo = vi.fn();
+const calendar = vi.fn();
+vi.mock("@/lib/calendar-source", () => ({ getCalendar: () => calendar() }));
 
 vi.mock("@/lib/capital", async (orig) => {
   const real = await orig<typeof import("@/lib/capital")>();
@@ -135,6 +137,7 @@ describe("order service", () => {
     __resetMemoryStorage();
     amend.mockReset().mockResolvedValue("ref3");
     closeInfo.mockReset().mockResolvedValue(null);
+    calendar.mockReset().mockResolvedValue({ events: [], updatedAt: Date.now(), stale: false });
     quote.mockReset().mockResolvedValue(Q);
     positions.mockReset().mockResolvedValue([]);
     open.mockReset().mockResolvedValue("ref1");
@@ -296,6 +299,7 @@ describe("noting orders in Mes trades", () => {
     close.mockReset().mockResolvedValue("ref2");
     amend.mockReset().mockResolvedValue("ref3");
     closeInfo.mockReset().mockResolvedValue(null);
+    calendar.mockReset().mockResolvedValue({ events: [], updatedAt: Date.now(), stale: false });
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -470,5 +474,88 @@ describe("related instruments", () => {
   it("follows the three new instruments", () => {
     const epics = INSTRUMENTS.map((i) => i.epic);
     expect(epics).toEqual(expect.arrayContaining(["US100", "US500", "EURUSD"]));
+  });
+});
+
+describe("announcements around an order", () => {
+  const ev = (min: number, impact: "high" | "medium" = "high", title = "CPI m/m") => ({ title, currency: "USD", impact, time: 0, minutesFromNow: min }) as never;
+  const Q2 = { status: "TRADEABLE", bid: 2650, offer: 2650.5 };
+
+  it("refuses an order just before or after a major announcement, saying why", () => {
+    const r = assessOrder(buy, Q2, [], NOW, [ev(10)]);
+    expect(r).toMatchObject({ ok: false, news: true });
+    expect(!r.ok && r.error).toMatch(/CPI m\/m.*dans 10 min/);
+    expect(assessOrder(buy, Q2, [], NOW, [ev(-10)])).toMatchObject({ ok: false, news: true });
+  });
+
+  it("lets it through once the owner acknowledged it, with a reminder in the recap", () => {
+    const r = assessOrder({ ...buy, ackNews: true }, Q2, [], NOW, [ev(10)]);
+    expect(r.ok && r.value.warnings.join(" ")).toMatch(/passé outre/);
+  });
+
+  it("does not block outside the window, a medium announcement, or an unknown calendar, but says so", () => {
+    expect(assessOrder(buy, Q2, [], NOW, [ev(45)]).ok).toBe(true);
+    expect(assessOrder(buy, Q2, [], NOW, [ev(-20)]).ok).toBe(true);
+    expect(assessOrder(buy, Q2, [], NOW, [ev(10, "medium")]).ok).toBe(true);
+    const soon = assessOrder(buy, Q2, [], NOW, [ev(60)]);
+    expect(soon.ok && soon.value.warnings.join(" ")).toMatch(/Annonce à venir/);
+    const unknown = assessOrder(buy, Q2, [], NOW, null);
+    expect(unknown.ok && unknown.value.warnings.join(" ")).toMatch(/Calendrier/);
+    expect(assessOrder(buy, Q2, [], NOW).ok).toBe(true); // not checked
+  });
+
+  it("parseOrder keeps the acknowledgement only when it is exactly true", () => {
+    expect(parseOrder({ epic: "GOLD", side: "long", size: 1, stop: 5, ackNews: true })).toMatchObject({ ok: true, value: { ackNews: true } });
+    const no = parseOrder({ epic: "GOLD", side: "long", size: 1, stop: 5, ackNews: "yes" });
+    expect(no.ok && no.value.ackNews).toBeUndefined();
+  });
+
+  describe("in the service", () => {
+    beforeEach(() => {
+      vi.stubEnv("TRADING_ENABLED", "true");
+      vi.stubEnv("CAPITAL_ENV", "demo");
+      vi.stubEnv("CAPITAL_BASE_URL", "");
+      vi.stubEnv("DASHBOARD_PASSWORD", "site-password");
+      vi.stubEnv("JOURNAL_STORAGE", "memory");
+      __resetMemoryStorage();
+      __resetOrders();
+      quote.mockReset().mockResolvedValue(Q);
+      positions.mockReset().mockResolvedValue([]);
+      open.mockReset().mockResolvedValue("ref1");
+      confirmation.mockReset().mockResolvedValue({ dealReference: "ref1", accepted: true, reason: null, dealId: "deal9", level: 2650.5 });
+    });
+    afterEach(() => vi.unstubAllEnvs());
+    const soonEvent = (min: number) => ({ title: "Federal Funds Rate", country: "USD", currency: "USD", impact: "high", time: Math.floor(NOW / 1000) + min * 60 });
+
+    it("refuses with its own error code, and sends nothing", async () => {
+      calendar.mockResolvedValue({ events: [soonEvent(12)], updatedAt: NOW, stale: false });
+      await expect(previewOrder(buy, NOW)).rejects.toMatchObject({ code: "NEWS_WINDOW", httpStatus: 422 });
+      expect(open).not.toHaveBeenCalled();
+    });
+
+    it("goes through with the acknowledgement, and the check is made again before sending", async () => {
+      calendar.mockResolvedValue({ events: [soonEvent(12)], updatedAt: NOW, stale: false });
+      const r = await previewOrder({ ...buy, ackNews: true }, NOW);
+      expect(r.plan.warnings.join(" ")).toMatch(/passé outre/);
+      expect((await placeOrder(r.token, null, NOW + 1_000)).status).toBe("accepted");
+    });
+
+    it("an announcement that appears between the recap and the sending stops an order that was not acknowledged", async () => {
+      calendar.mockResolvedValue({ events: [], updatedAt: NOW, stale: false });
+      const r = await previewOrder(buy, NOW);
+      calendar.mockResolvedValue({ events: [soonEvent(8)], updatedAt: NOW, stale: false });
+      await expect(placeOrder(r.token, null, NOW + 1_000)).rejects.toMatchObject({ code: "NEWS_WINDOW" });
+      expect(open).not.toHaveBeenCalled();
+    });
+
+    it("only counts announcements that matter for the instrument", async () => {
+      calendar.mockResolvedValue({ events: [{ ...soonEvent(12), currency: "JPY", title: "BoJ" }], updatedAt: NOW, stale: false });
+      expect((await previewOrder(buy, NOW)).order.epic).toBe("GOLD");
+    });
+
+    it("still allows an order, with a warning, when the calendar cannot be read", async () => {
+      calendar.mockRejectedValue(new Error("down"));
+      expect((await previewOrder(buy, NOW)).plan.warnings.join(" ")).toMatch(/Calendrier/);
+    });
   });
 });
