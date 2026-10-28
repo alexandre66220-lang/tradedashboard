@@ -174,36 +174,61 @@ export function getStorage(): JournalStorage | null {
 }
 
 /**
- * What the health panel shows when Netlify Blobs does not answer: which pieces of the runtime context exist (names only,
- * never values) and whether a read works with each consistency mode, with the time it took.
+ * What the health panel (and the scheduled alert check, in the logs) shows when Netlify Blobs misbehaves: which pieces of
+ * the runtime context exist (names only, never values), and whether each kind of operation works, with its duration.
  */
-export async function netlifyDiagnostics(): Promise<{ context: string; eventual: string; strong: string; strongOk: boolean; eventualOk: boolean }> {
+export interface BlobsDiagnostics {
+  context: string;
+  /** One line per operation: "liste: ok (35 ms)" */
+  steps: string[];
+  /** Reads of a file that exists, with each consistency mode: what the app depends on */
+  readOk: boolean;
+  anyOk: boolean;
+}
+
+export async function netlifyDiagnostics(): Promise<BlobsDiagnostics> {
   const g = (globalThis as { netlifyBlobsContext?: unknown }).netlifyBlobsContext;
   let context = "absent";
   try {
     const raw = typeof g === "string" ? g : process.env.NETLIFY_BLOBS_CONTEXT;
-    if (raw) {
-      const parsed = typeof g === "object" && g ? (g as Record<string, unknown>) : JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-      context = `${g ? "global" : "env"}: ${["edgeURL", "uncachedEdgeURL", "apiURL", "siteID", "token"].map((k) => `${k}${parsed[k] ? "✓" : "✗"}`).join(" ")}`;
+    if (raw || (g && typeof g === "object")) {
+      const parsed = typeof g === "object" && g ? (g as Record<string, unknown>) : JSON.parse(Buffer.from(raw as string, "base64").toString("utf8"));
+      context = `${g ? "global" : "env"}: ${["edgeURL", "uncachedEdgeURL", "apiURL", "siteID", "token", "primaryRegion"].map((k) => `${k}${parsed[k] ? "✓" : "✗"}`).join(" ")}`;
     }
   } catch {
     context = "présent mais illisible";
   }
-  const probe = async (consistency: "eventual" | "strong") => {
+  const name = process.env.NETLIFY_BLOBS_STORE || "tradedashboard";
+  const steps: string[] = [];
+  const results: Record<string, boolean> = {};
+  const step = async (label: string, fn: () => Promise<unknown>) => {
     const t = Date.now();
     try {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("pas de réponse en 4 s")), 4000);
-        getStore({ name: process.env.NETLIFY_BLOBS_STORE || "tradedashboard", consistency })
-          .get("health/ping", { consistency })
-          .then(() => (clearTimeout(timer), resolve()), (e) => (clearTimeout(timer), reject(e)));
+        fn().then(() => (clearTimeout(timer), resolve()), (e) => (clearTimeout(timer), reject(e)));
       });
-      return { ok: true, text: `ok (${Date.now() - t} ms)` };
+      steps.push(`${label}: ok (${Date.now() - t} ms)`);
+      results[label] = true;
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : "erreur";
-      return { ok: false, text: `échec (${msg.slice(0, 140)})` };
+      steps.push(`${label}: ÉCHEC (${msg.slice(0, 120)})`);
+      results[label] = false;
     }
   };
-  const [e, st] = await Promise.all([probe("eventual"), probe("strong")]);
-  return { context, eventual: e.text, strong: st.text, eventualOk: e.ok, strongOk: st.ok };
+  const strong = () => getStore({ name, consistency: "strong" });
+  const eventual = () => getStore({ name, consistency: "eventual" });
+  await Promise.all([
+    step("liste", () => strong().list({ prefix: "health/" })),
+    step("lecture d'un fichier absent (stricte)", () => strong().get("health/absent", { consistency: "strong" })),
+    step("lecture d'un fichier absent (rapide)", () => eventual().get("health/absent", { consistency: "eventual" })),
+  ]);
+  await step("écriture", () => strong().setJSON("health/ping", { at: Date.now() }));
+  await Promise.all([
+    step("lecture du fichier écrit (stricte)", () => strong().get("health/ping", { type: "json", consistency: "strong" })),
+    step("lecture du fichier écrit (rapide)", () => eventual().get("health/ping", { type: "json", consistency: "eventual" })),
+    step("lecture avec métadonnées (comme l'appli)", () => strong().getWithMetadata("health/ping", { type: "json", consistency: "strong" })),
+  ]);
+  const readOk = results["lecture avec métadonnées (comme l'appli)"] === true;
+  return { context, steps, readOk, anyOk: Object.values(results).some(Boolean) };
 }

@@ -5,7 +5,7 @@ import { timingSafeEqualStr } from "@/lib/auth";
 import { getCalendar } from "@/lib/calendar-source";
 import { getCandles } from "@/lib/capital";
 import { handleError, jsonError } from "@/lib/http";
-import { getStorage } from "@/lib/journal/storage";
+import { backend, getStorage, netlifyDiagnostics } from "@/lib/journal/storage";
 import { notifyConfigured, sendNotification } from "@/lib/notify";
 import { readList, updateList } from "@/lib/store";
 import { readTrades } from "@/lib/trades-store";
@@ -25,6 +25,11 @@ export async function GET(req: Request) {
   if (!secret) return jsonError("CONFIG_MISSING", "CRON_SECRET n'est pas défini côté serveur.", 503);
   if (!timingSafeEqualStr(req.headers.get("authorization") ?? "", `Bearer ${secret}`)) {
     return jsonError("UNAUTHORIZED", "Authentification requise.", 401);
+  }
+  // Temporary: while Netlify Blobs misbehaves, each check writes what works and what does not into the function logs
+  if (backend() === "netlify") {
+    const d = await netlifyDiagnostics().catch(() => null);
+    if (d) console.warn(`[storage-diag] ${d.context} | ${d.steps.join(" | ")}`);
   }
   if (!notifyConfigured()) return NextResponse.json({ sent: 0, note: "notifications non configurées (NTFY_TOPIC)" });
   if (!getStorage()) return NextResponse.json({ sent: 0, note: "stockage non configuré" });

@@ -79,12 +79,11 @@ const checkStorage = () =>
   guard("storage", "Stockage (journal, trades, alertes)", async () => {
     if (!getStorage()) return { status: "error", detail: "Aucun stockage configuré : le journal, les trades et les alertes ne sont pas enregistrés." };
     if (backend() === "netlify") {
-      // Says why Netlify Blobs fails instead of just timing out
+      // Says which kind of operation fails instead of just timing out
       const d = await netlifyDiagnostics();
-      const detail = `Contexte : ${d.context}. Lecture rapide : ${d.eventual}. Lecture stricte : ${d.strong}.`;
-      if (!d.eventualOk && !d.strongOk) return { status: "error", detail: `Netlify Blobs ne répond pas. ${detail}` };
-      if (!d.strongOk) return { status: "warn", detail: `La lecture stricte échoue. ${detail}` };
-      await readList("health/ping");
+      const detail = `Contexte : ${d.context}. ${d.steps.join(" · ")}.`;
+      if (!d.anyOk) return { status: "error", detail: `Netlify Blobs ne répond pas. ${detail}` };
+      if (!d.readOk) return { status: "error", detail: `Netlify Blobs répond, mais pas la lecture utilisée par l'appli. ${detail}` };
       return { status: "ok", detail: `Lecture possible (Netlify Blobs). ${detail}` };
     }
     await readList("health/ping");
