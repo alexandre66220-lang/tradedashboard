@@ -145,6 +145,17 @@ Option **désactivée par défaut**. Pour l'activer : variable `TRADING_ENABLED=
 - **Déplacer le stop** (`PATCH /api/orders/{dealId}`, `PUT /api/v1/positions/{dealId}`) : champ + bouton « À l'entrée » + « Déplacer le stop » (deux appuis). Un stop ne peut que **se rapprocher** du prix, jamais s'en éloigner, reste du bon côté du prix avec au moins le spread de marge, et l'objectif existant est renvoyé avec la demande. Le stop d'origine reste la base du résultat en R ; le stop déplacé est noté à côté. Possible même quand les nouveaux ordres sont coupés.
 - Ce n'est pas un conseil d'investissement, et rien ici ne prouve qu'un signal est rentable : voir « Signal validé ».
 
+### Positionnement du marché (OKX, CFTC)
+
+Panneau « Positionnement du marché » (onglet Prévision) et lignes dans le journal. **Contexte, pas signal** : rien n'entre dans le modèle tant que le journal n'a pas montré que ça aide.
+
+- **Dérivés Bitcoin (OKX, données publiques sans clé)** : funding du contrat perpétuel BTC-USDT (ce que les acheteurs paient aux vendeurs, ou l'inverse, toutes les 8 h ; très positif = acheteurs surchargés), part des comptes acheteurs (`rubik/stat/contracts/long-short-account-ratio`) et variation des positions ouvertes sur 1 h (`open-interest-history`). Lu à la demande, gardé 2 min (5 min après un échec). Choisi plutôt que MarginPad : même type de donnée, mais une source établie et ouverte.
+- **Grands spéculateurs (CFTC, rapport hebdomadaire « Commitments of Traders »)** : position nette des acteurs non commerciaux en % des positions ouvertes et son rang sur ~3 ans, pour les six instruments (codes de contrat dans `lib/context/cftc.ts`). Les positions sont celles du **mardi, publiées le vendredi** : un rapport n'est utilisé qu'après sa publication (vendredi 20 h 30 UTC), jamais avant, pour ne pas fausser les mesures.
+- **Mesuré par le journal, pas supposé** : chaque prévision enregistre le funding / le rang CFTC du moment (horodatés, comme le sentiment des clients). Le journal affiche ensuite la réussite quand la prévision va **dans le sens** ou **à contre-courant** de ces foules (seuils : funding ≥ 0,02 % ou ≤ −0,005 % par 8 h ; CFTC au-dessus du 80ᵉ ou sous le 20ᵉ rang). Une fois assez de cas, on saura si ça apporte quelque chose ; seulement alors une variable pourra être ajoutée au modèle ML (le panneau « Comparer les versions du modèle » mesure le gain avec et sans).
+- **Facultatif et sans risque** : chaque source a un délai court, un cache et un repli silencieux ; si l'une ne répond pas, le panneau dit « non disponible » et le reste fonctionne. « Santé du système » liste leur état (sans changer la couleur générale).
+- **Écartées, et pourquoi** : sources de prix (CoinGecko, CoinCap, Goldprice…) redondantes avec Capital.com ; taux de change quotidiens (Frankfurter) remplacés par l'Euro/Dollar de Capital.com en 5 minutes ; rendements du Trésor, macro (Econdb, Helious) et ETF (TickerInside) quotidiens ou mensuels, sans lien démontré avec un mouvement de 30 minutes ; horaires de séance (Futures Clock) déjà couverts par l'état du marché et le découpage par session du journal ; mempool et stablecoins (on-chain) trop lents ; Reddit trop bruité.
+- `OKX_BASE_URL` et `CFTC_URL` ne servent qu'aux tests locaux avec le faux serveur (`scripts/mock-capital.mjs`).
+
 ### Feu « pas de trade maintenant »
 
 Pastille sous le prix, toujours informative (rien n'est bloqué) :

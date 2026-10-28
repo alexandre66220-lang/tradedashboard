@@ -96,6 +96,17 @@ http.createServer((req, res) => {
     return send(res, 200, process.env.MOCK_CAL_BAD ? { not: "a list" } : list);
   }
   if (url.pathname === "/ff_calendar_nextweek.json") return send(res, 404, {});
+  // Outside data (tests only): OKX_BASE_URL / CFTC_URL point here
+  if (url.pathname.startsWith("/api/v5/")) {
+    if (process.env.MOCK_OKX_DOWN) return send(res, 503, {});
+    if (url.pathname.endsWith("/funding-rate")) return send(res, 200, { code: "0", data: [{ fundingRate: "0.00032", fundingTime: String(Date.now()) }] });
+    if (url.pathname.endsWith("/long-short-account-ratio")) return send(res, 200, { code: "0", data: [[String(Date.now()), "1.62"]] });
+    if (url.pathname.endsWith("/open-interest-history")) return send(res, 200, { code: "0", data: Array.from({ length: 13 }, (_, i) => [String(Date.now() - i * 300000), "0", "0", String(i === 0 ? 5_150_000_000 : 5_000_000_000)]) });
+  }
+  if (url.pathname === "/cot.json") {
+    const now = Date.now();
+    return send(res, 200, Array.from({ length: 120 }, (_, i) => ({ report_date_as_yyyy_mm_dd: new Date(now - (i + 2) * 7 * 86400000).toISOString().slice(0, 10) + "T00:00:00.000", open_interest_all: "500000", noncomm_positions_long_all: String(290000 - i * 400), noncomm_positions_short_all: "100000" })));
+  }
   if (req.headers["x-cap-api-key"] !== "test-key") return send(res, 401, { errorCode: "error.invalid.api.key" });
   if (url.pathname === "/__close") {
     // Tests only: the broker closes a position by itself (stop or target hit) and logs it in the activity

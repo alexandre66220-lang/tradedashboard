@@ -29,6 +29,8 @@ import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
 import OrderPanel, { type OrderDraft } from "./OrderPanel";
+import ContextPanel from "./ContextPanel";
+import { useMarketContext } from "@/lib/useMarketContext";
 import { useOrders } from "@/lib/useOrders";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
 import Disclaimer from "./Disclaimer";
@@ -97,6 +99,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
   const orders = useOrders();
+  const marketContext = useMarketContext(epic);
   const [orderDraft, setOrderDraft] = useState<OrderDraft | null>(null);
   const [dailyLimit, setDailyLimitState] = useState<number | null>(null);
   const [tab, setTab] = useState<TabId>("forecast");
@@ -485,6 +488,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             }}
           />
           <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
+          <ContextPanel data={marketContext} direction={forecast?.direction} />
           <CompareChart selected={epic} onSelect={selectEpic} />
           </div>
           <div role="tabpanel" id="panel-trade" aria-labelledby="tab-trade" className="tabpanel" hidden={activeTab !== "trade"}>

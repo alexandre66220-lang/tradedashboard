@@ -2,6 +2,7 @@ import "server-only";
 import { financingBpsFor, INSTRUMENTS, spreadBpsFor } from "@/config/instruments";
 import { getCandles, getMarketQuote, getSentimentFor } from "@/lib/capital";
 import { regimeOf } from "@/lib/regime";
+import { readingsForJournal } from "@/lib/context";
 import { relevantEvents } from "@/lib/calendar";
 import { getCalendar } from "@/lib/calendar-source";
 import type { Candle, ForecastResponse } from "@/lib/types";
@@ -54,7 +55,9 @@ async function readingsAt(series: SeriesRef, candles: Candle[], forecast: Foreca
   const last = candles.at(-1);
   if (!last || candles.length < 60) return undefined;
   const atr = averageTrueRange(candles) ?? undefined;
+  const external = await readingsForJournal(series.epic, series.resMinutes < 1440).catch(() => ({}));
   return {
+    ...external,
     confluence: stampFor(technicalVotes(candles, series.resMinutes), forecast.direction) ?? undefined,
     nearFib: nearFibLevel(last.close, fibRetracement(candles), atr ?? null),
     atr,

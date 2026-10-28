@@ -125,6 +125,21 @@ const checkCalendar = () =>
       : { status: "ok", detail: `${c.events.length} annonces chargées, mises à jour ${ago(Date.now() - c.updatedAt)}.` };
   });
 
+/** The optional outside data (never required): says which source answers, so that a missing panel is not a mystery. */
+const checkContext = () =>
+  guard("context", "Données externes (OKX, CFTC)", async () => {
+    const { getContext } = await import("@/lib/context");
+    const [btc, gold] = await Promise.all([getContext("BTCUSD"), getContext("GOLD")]);
+    const parts = [
+      `dérivés Bitcoin OKX : ${btc.sources.derivs === "ok" ? "ok" : "injoignable"}`,
+      `CFTC (or) : ${gold.sources.cot === "ok" ? "ok" : "injoignable"}`,
+    ];
+    const down = btc.sources.derivs !== "ok" || gold.sources.cot !== "ok";
+    return down
+      ? { status: "warn", detail: `${parts.join(" · ")}. Facultatif : les panneaux concernés disent « non disponible » et le reste fonctionne.` }
+      : { status: "ok", detail: parts.join(" · ") + "." };
+  });
+
 /** Settings that are only booleans here: the values themselves never leave the server. */
 const checkSettings = () =>
   guard("settings", "Réglages", async () => {
@@ -139,7 +154,8 @@ const checkSettings = () =>
 const ORDER: Record<HealthStatus, number> = { off: 0, ok: 1, warn: 2, error: 3 };
 
 export async function healthReport(): Promise<HealthReport> {
-  const checks = await Promise.all([checkCapital(), checkModel(), checkStorage(), checkJournal(), checkBackup(), checkCalendar(), checkSettings()]);
-  const worst = checks.reduce<HealthStatus>((w, c) => (ORDER[c.status] > ORDER[w] ? c.status : w), "ok");
+  const checks = await Promise.all([checkCapital(), checkModel(), checkStorage(), checkJournal(), checkBackup(), checkCalendar(), checkContext(), checkSettings()]);
+  // The optional outside data is shown, but its absence does not make the system "unhealthy"
+  const worst = checks.filter((c) => c.id !== "context").reduce<HealthStatus>((w, c) => (ORDER[c.status] > ORDER[w] ? c.status : w), "ok");
   return { generatedAt: Date.now(), overall: worst === "off" ? "ok" : worst, checks };
 }

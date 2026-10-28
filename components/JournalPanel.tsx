@@ -61,6 +61,18 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
           {fmtHit(st.bySentiment.against)} · foule partagée {fmtHit(st.bySentiment.neutral)}.
         </p>
       )}
+      {st.byFunding.with.samples + st.byFunding.against.samples + st.byFunding.neutral.samples > 0 && (
+        <p className="muted small">
+          Selon le positionnement des dérivés Bitcoin (funding) : prévision dans le sens de la foule {fmtHit(st.byFunding.with)} · à contre-courant{" "}
+          {fmtHit(st.byFunding.against)} · foule équilibrée {fmtHit(st.byFunding.neutral)}.
+        </p>
+      )}
+      {st.byCot.with.samples + st.byCot.against.samples + st.byCot.neutral.samples > 0 && (
+        <p className="muted small">
+          Selon les grands spéculateurs (CFTC, quand ils sont à un extrême de leur fourchette) : dans leur sens {fmtHit(st.byCot.with)} · à contre-courant{" "}
+          {fmtHit(st.byCot.against)} · pas d’extrême {fmtHit(st.byCot.neutral)}.
+        </p>
+      )}
       {SESSIONS.some((x) => st.bySession[x.key].hit.samples > 0) && (
         <p className="muted small">
           Selon le moment de la journée (heures UTC, Paris = UTC+1 ou +2) :{" "}

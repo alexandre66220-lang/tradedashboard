@@ -37,6 +37,10 @@ export interface JournalEntry {
   regime?: Regime;
   /** Simulated trade on the forecast (stop 1.5 ATR, target twice the stop, else out at the horizon), gross result in R */
   sim?: { r: number; exit: "stop" | "target" | "time" };
+  /** Bitcoin perpetual futures positioning (OKX) when the forecast was made: funding per 8 h (fraction), % of accounts long, open interest change over 1 h (%) */
+  deriv?: { funding: number; longPct?: number; oi1hPct?: number };
+  /** Where the big speculators (CFTC weekly report) stood, as a percentile of the last three years (0 = the most short, 100 = the most long) */
+  cot?: number;
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -79,6 +83,10 @@ export interface JournalStats {
   baselines: { alwaysUp: JournalHit; lastMove: JournalHit };
   /** Hit rate depending on whether the forecast agreed with the crowd (>= 60 % on one side) */
   bySentiment: { with: JournalHit; against: JournalHit; neutral: JournalHit };
+  /** Hit rate depending on whether the forecast went with or against the Bitcoin funding crowd (positive funding = longs crowded) */
+  byFunding: { with: JournalHit; against: JournalHit; neutral: JournalHit };
+  /** Hit rate depending on whether the forecast went with or against the big speculators when they sit at an extreme of their range */
+  byCot: { with: JournalHit; against: JournalHit; neutral: JournalHit };
   /** Hit rate and net result by moment of the day (UTC hour of the forecast), intraday series only */
   bySession: Record<SessionKey, { hit: JournalHit; netReturnPct: number }>;
   /** Simulated trades (stop 1.5 ATR, target 2 R) after spread and financing; the mean is null below 20 trades */
