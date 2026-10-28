@@ -30,8 +30,10 @@ export async function GET(req: Request) {
     // Per instrument: the default intraday forecast. The daily and weekly outlooks are computed (and recorded) by buildOutlook.
     const jobs = scope === "daily" ? [] : INSTRUMENTS.map((inst) => ({ epic: inst.epic, resolution: "MINUTE_5", resMinutes: 5, horizon: inst.defaultHorizon }));
     const outlook = scope === "intraday" ? null : buildOutlook(45_000);
-    const results = await Promise.allSettled(
-      jobs.map(async (series) => {
+    // A few at a time: each forecast reads several price histories and trains the model, and Capital.com limits the calls
+    const results: PromiseSettledResult<void>[] = [];
+    for (let i = 0; i < jobs.length; i += 3) {
+      results.push(...(await Promise.allSettled(jobs.slice(i, i + 3).map(async (series) => {
         const candles = await getCandles(series.epic, series.resolution, 1000, 60_000);
         const forecast = await runForecast({
           epic: series.epic,
@@ -41,8 +43,8 @@ export async function GET(req: Request) {
           candles,
         });
         await recordSafe(series, candles, forecast);
-      }),
-    );
+      }))));
+    }
     const done = outlook ? await outlook : null;
     return NextResponse.json(
       { jobs: jobs.length, failed: results.filter((r) => r.status === "rejected").length, ...(done ? { outlookPending: Boolean(done.pending) } : {}) },

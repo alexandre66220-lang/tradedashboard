@@ -110,7 +110,7 @@ export default function TradesPanel(p: Props) {
     <section className="panel journal" id="trades">
       <div className="panel-head">
         <span>Mes trades</span>
-        <span className="tag">réel</span>
+        <span className="tag">vos trades</span>
       </div>
 
       {p.configured === false && <p className="muted small">Journal de trades non configuré : aucun stockage Blob n’est relié à ce projet.</p>}
@@ -246,13 +246,18 @@ export default function TradesPanel(p: Props) {
                       <div className="trow">
                         <strong>
                           {nameOf(t.epic)} · {t.side === "long" ? "achat" : "vente"} {t.size}
+                          {t.demo && <span className="badge demo order-badge">DÉMO</span>}
                         </strong>
                         <span className={sign(live ?? 0)}>{live === null ? "—" : money(live)}</span>
                       </div>
                       <div className="muted small">
                         Entrée {t.entry} · {t.stop ? `stop ${t.stop}` : "sans stop"}
+                        {t.stopMoved ? ` (déplacé à ${t.stopMoved})` : ""}
                         {t.target ? ` · objectif ${t.target}` : ""} · {when(t.openedAt)}
                       </div>
+                      {t.brokerClosed && (
+                        <p className="rc-warn">Cette position n’est plus ouverte chez Capital.com (stop, objectif ou fermeture sur leur plateforme) : indiquez le prix de sortie ci-dessous.</p>
+                      )}
                       <div className="tclose">
                         <input
                           inputMode="decimal"
@@ -295,6 +300,7 @@ export default function TradesPanel(p: Props) {
                       <div className="trow">
                         <span>
                           {nameOf(t.epic)} · {t.side === "long" ? "achat" : "vente"} {t.size} · {t.entry} → {t.exit}
+                          {t.demo && <span className="badge demo order-badge">DÉMO</span>}
                         </span>
                         <span className={sign(pnl)}>
                           {money(pnl)}

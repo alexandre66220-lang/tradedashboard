@@ -21,6 +21,13 @@ export interface Trade {
   note?: string;
   closedAt?: number;
   exit?: number;
+  /** Opened from the dashboard (or found on the demo account): the Capital.com deal this trade follows */
+  dealId?: string;
+  demo?: boolean;
+  /** Stop after it was moved (the original `stop` stays the basis of the result in R) */
+  stopMoved?: number;
+  /** When the position was seen gone from the account without its closing price: the exit has to be entered by hand */
+  brokerClosed?: number;
 }
 
 export const MAX_TRADES = 2000;

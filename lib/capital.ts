@@ -471,6 +471,10 @@ const TRADING_ALLOWED = [
   { method: "GET", path: /^\/api\/v1\/positions$/ },
   { method: "DELETE", path: /^\/api\/v1\/positions\/[A-Za-z0-9._-]+$/ },
   { method: "GET", path: /^\/api\/v1\/confirms\/[A-Za-z0-9._-]+$/ },
+  // Moves the stop of an open position (never used to open or close one)
+  { method: "PUT", path: /^\/api\/v1\/positions\/[A-Za-z0-9._-]+$/ },
+  // Read-only history of what happened on the account: tells at what price a position was closed by its stop or target
+  { method: "GET", path: /^\/api\/v1\/history\/activity$/ },
 ];
 
 export function assertDemoOnly() {
@@ -487,10 +491,10 @@ export function assertDemoOnly() {
   }
 }
 
-async function apiTrade<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+async function apiTrade<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   assertDemoOnly();
-  if (!TRADING_ALLOWED.some((a) => a.method === method && a.path.test(path))) {
-    throw new Error(`Blocked Capital.com call: ${method} ${path}`);
+  if (!TRADING_ALLOWED.some((a) => a.method === method && a.path.test(path.split("?")[0]))) {
+    throw new Error(`Blocked Capital.com call: ${method} ${path.split("?")[0]}`);
   }
   const { apiKey, baseUrl } = config();
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -597,7 +601,7 @@ export interface DealConfirmation {
 /** An answer that never came may still have opened the position: the caller must say so rather than retry. */
 const UNKNOWN_OUTCOME = "Pas de réponse de Capital.com : l'ordre a peut-être été envoyé. Vérifiez la liste des positions avant de réessayer.";
 
-async function sendDeal(method: "POST" | "DELETE", path: string, body?: unknown): Promise<string> {
+async function sendDeal(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<string> {
   try {
     const res = await apiTrade<{ dealReference?: unknown }>(method, path, body);
     if (typeof res?.dealReference !== "string" || !/^[A-Za-z0-9._-]+$/.test(res.dealReference)) {
@@ -621,6 +625,18 @@ export async function openPosition(req: PositionRequest): Promise<string> {
   });
 }
 
+/**
+ * Moves the stop of an open position. The current target is sent again with it: an amendment that left it out might
+ * be read as "no target any more".
+ */
+export async function amendPositionStop(dealId: string, stopLevel: number, profitLevel: number | null): Promise<string> {
+  return sendDeal("PUT", `/api/v1/positions/${encodeURIComponent(dealId)}`, {
+    guaranteedStop: false,
+    stopLevel,
+    ...(profitLevel !== null ? { profitLevel } : {}),
+  });
+}
+
 export async function closePositionDeal(dealId: string): Promise<string> {
   return sendDeal("DELETE", `/api/v1/positions/${encodeURIComponent(dealId)}`);
 }
@@ -636,4 +652,39 @@ export async function getConfirmation(dealReference: string): Promise<DealConfir
     dealId: typeof d.dealId === "string" ? d.dealId : null,
     level: finite(d.level),
   };
+}
+
+export interface CloseInfo {
+  level: number;
+  /** ms */
+  at: number | null;
+}
+
+/**
+ * Looks in the account activity for the closing of `dealId`: { activities: [{ dateUTC, dealId, details: { level, actions:
+ * [{ actionType, affectedDealId }] } }] }. Anything that does not look right gives null (the caller then asks the owner
+ * for the exit price instead of guessing it).
+ */
+export function parseCloseActivity(data: unknown, dealId: string): CloseInfo | null {
+  const list = (data as { activities?: unknown } | null)?.activities;
+  if (!Array.isArray(list)) return null;
+  let best: CloseInfo | null = null;
+  for (const a of list as Array<Record<string, unknown>>) {
+    const d = a?.details as { level?: unknown; actions?: unknown } | undefined;
+    const actions = Array.isArray(d?.actions) ? (d.actions as Array<Record<string, unknown>>) : [];
+    const closes = actions.some((x) => x?.actionType === "POSITION_CLOSED" && (x.affectedDealId === dealId || a.dealId === dealId));
+    const level = finite(d?.level);
+    if (!closes || level === null || level <= 0) continue;
+    const when = typeof a.dateUTC === "string" ? parseUtc(a.dateUTC) * 1000 : typeof a.date === "string" ? parseUtc(a.date) * 1000 : NaN;
+    const at = Number.isFinite(when) ? when : null;
+    if (!best || (at ?? 0) >= (best.at ?? 0)) best = { level, at };
+  }
+  return best;
+}
+
+/** Closing price of a position that is gone from the list (stop or target hit, or closed on Capital.com itself). */
+export async function getCloseInfo(dealId: string, sinceMs: number): Promise<CloseInfo | null> {
+  const from = new Date(Math.max(0, sinceMs - 60_000)).toISOString().slice(0, 19);
+  const data = await apiTrade<unknown>("GET", `/api/v1/history/activity?from=${from}&detailed=true`);
+  return parseCloseActivity(data, dealId);
 }

@@ -17,9 +17,9 @@ export async function GET() {
 /** Sends the order whose signed recap (from /api/orders/preview) is given. */
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return crossOriginRefused();
-  const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { token?: unknown; model?: unknown } | null;
   try {
-    return NextResponse.json(await placeOrder(body?.token), { headers: noStore });
+    return NextResponse.json(await placeOrder(body?.token, body?.model), { headers: noStore });
   } catch (err) {
     return handleError(err);
   }
