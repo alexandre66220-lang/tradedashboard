@@ -112,21 +112,37 @@ function within<T>(p: Promise<T>): Promise<T> {
   });
 }
 
+// Reading a file that does not exist yet never gets an answer from Netlify Blobs (production logs: a list, a write and the
+// read of an existing file answer in 30-100 ms, the read of a missing file hangs). So the list is asked first, and only
+// files that are there are read. Files seen once are not checked again by this instance.
+const known = new Set<string>();
+
 export function netlifyStorage(): JournalStorage {
   const store = () => getStore({ name: process.env.NETLIFY_BLOBS_STORE || "tradedashboard", consistency: "strong" });
   return {
     async read<T>(key: string) {
-      const found = await within(store().getWithMetadata(key, { type: "json", consistency: "strong" }));
-      if (!found) return { entries: [] as T[], etag: null };
+      const s = store();
+      if (!known.has(key)) {
+        const { blobs } = await within(s.list({ prefix: key }));
+        if (!blobs.some((b) => b.key === key)) return { entries: [] as T[], etag: null };
+        known.add(key);
+      }
+      const found = await within(s.getWithMetadata(key, { type: "json", consistency: "strong" }));
+      if (!found) {
+        known.delete(key);
+        return { entries: [] as T[], etag: null };
+      }
       return { entries: (Array.isArray(found.data) ? found.data : []) as T[], etag: found.etag ?? null };
     },
     async write<T>(key: string, entries: T[], etag: string | null, force = false) {
       const s = store();
       if (force) {
         await within(s.setJSON(key, entries));
+        known.add(key);
         return true;
       }
       const res = await within(etag ? s.setJSON(key, entries, { onlyIfMatch: etag }) : s.setJSON(key, entries, { onlyIfNew: true }));
+      if (res.modified) known.add(key);
       return res.modified;
     },
     async list(prefix = PREFIX) {
@@ -135,6 +151,7 @@ export function netlifyStorage(): JournalStorage {
     },
     async remove(key) {
       await store().delete(key);
+      known.delete(key);
     },
   };
 }
@@ -157,6 +174,7 @@ let memory: JournalStorage | null = null;
 /** Tests only: forget what the in-memory store holds. */
 export function __resetMemoryStorage() {
   memory = null;
+  known.clear();
 }
 
 /** null when the journal is not configured (no store available). */
