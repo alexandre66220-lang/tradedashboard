@@ -9,6 +9,8 @@ vi.mock("@/lib/capital", async () => {
 });
 vi.mock("@/lib/calendar-source", () => ({ getCalendar: () => calendar() }));
 vi.mock("@/lib/journal/service", () => ({ journalOverview: () => overview() }));
+const context = vi.fn();
+vi.mock("@/lib/context", () => ({ getContext: (...a: unknown[]) => context(...a) }));
 
 import { CapitalError } from "@/lib/capital";
 import { healthReport, JOURNAL_SILENT_ERROR_MS, JOURNAL_SILENT_WARN_MS } from "@/lib/health";
@@ -31,6 +33,7 @@ beforeEach(() => {
   quote.mockResolvedValue({ status: "TRADEABLE", bid: 1, offer: 1 });
   calendar.mockResolvedValue({ events: [{}, {}], updatedAt: Date.now() - 60_000, stale: false });
   overview.mockResolvedValue(journal(5 * 60_000));
+  context.mockResolvedValue({ derivs: {}, cot: {}, sources: { derivs: "ok", cot: "ok" } });
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -45,6 +48,15 @@ describe("health report", () => {
     expect(by(r, "capital").status).toBe("ok");
     expect(by(r, "model").status).toBe("off"); // no external model configured: not a problem
     expect(by(r, "journal").detail).toMatch(/12 prévisions sur 24 h/);
+  });
+
+  it("tells when the optional outside data is down, without turning the whole panel orange", async () => {
+    await saveBackup();
+    context.mockResolvedValue({ derivs: null, cot: null, sources: { derivs: "down", cot: "down" } });
+    const r = await healthReport();
+    expect(by(r, "context").status).toBe("warn");
+    expect(by(r, "context").detail).toMatch(/Facultatif/);
+    expect(r.overall).toBe("ok");
   });
 
   it("reports a Capital.com failure with its message, without failing the whole report", async () => {

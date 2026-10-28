@@ -334,3 +334,6 @@ code { overflow-wrap: anywhere; }
 .order-stop button { white-space: nowrap; }
 .order-stop .order-close.armed { min-width: 0; padding: 4px 10px; min-height: 32px; }
 .order-badge { margin-left: 6px; vertical-align: middle; }
+.ctx-block { margin-top: 10px; }
+.ctx-block + .ctx-block, .ctx-block + p { margin-top: 12px; }
+.ctx-block .stats { margin: 6px 0; }
