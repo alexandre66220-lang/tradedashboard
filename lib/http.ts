@@ -24,3 +24,22 @@ export function parseCommon(url: URL):
   }
   return { ok: true, instrument, resolution: res, api: RESOLUTIONS[res].api };
 }
+
+/**
+ * Requests that move money must come from this site's own pages: a form on another site cannot make the browser send
+ * the session cookie along with a matching Origin.
+ */
+export function sameOrigin(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  let host: string;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return false;
+  }
+  const allowed = [req.headers.get("host"), req.headers.get("x-forwarded-host"), new URL(req.url).host];
+  return allowed.some((h) => h && h === host);
+}
+
+export const crossOriginRefused = () => jsonError("FORBIDDEN", "Requête refusée : elle ne vient pas de ce site.", 403);

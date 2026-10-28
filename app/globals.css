@@ -314,3 +314,17 @@ code { overflow-wrap: anywhere; }
 .backup { margin-top: 10px; }
 .backup summary { cursor: pointer; color: var(--muted); font-size: 12px; min-height: 40px; display: flex; align-items: center; }
 .linkbtn { display: inline-flex; align-items: center; margin: 4px 8px 4px 0; text-decoration: none; cursor: pointer; min-height: 38px; }
+
+/* orders (demo account) */
+.order-last { font-size: 15px; font-weight: 600; color: var(--text); min-height: 34px; display: flex; align-items: center; }
+.order-recap { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.order-send { background: var(--up); color: #04210f; }
+.order-send:disabled, .sl-apply:disabled { opacity: .5; cursor: not-allowed; }
+.order-cancel { width: 100%; margin-top: 8px; }
+.order-result { margin-top: 10px; }
+.order-result p { margin: 0 0 8px; }
+.order-pos-head { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.order-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.order-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.order-close { min-width: 88px; }
+.order-close.armed { background: var(--down); border: 0; border-radius: 6px; color: #fff; font-weight: 600; cursor: pointer; min-height: 38px; }

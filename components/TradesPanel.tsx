@@ -318,7 +318,7 @@ export default function TradesPanel(p: Props) {
       )}
 
       <Disclaimer>
-        Journal personnel, saisi à la main : le dashboard ne passe aucun ordre. Résultats en devise de cotation (USD), avant frais de financement.
+        Journal personnel, saisi à la main (ou depuis un ordre démo). Résultats en devise de cotation (USD), avant frais de financement.
         Aucun taux n’est affiché sous 20 trades clôturés. Ce n’est pas un conseil d’investissement.
       </Disclaimer>
     </section>

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Market Dashboard",
     short_name: "Marché",
-    description: "Suivi de marché en lecture seule",
+    description: "Suivi de marché",
     start_url: "/",
     display: "standalone",
     orientation: "any",

@@ -28,6 +28,8 @@ import TabBar, { type TabId } from "./TabBar";
 import TrafficLight from "./TrafficLight";
 import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
+import OrderPanel, { type OrderDraft } from "./OrderPanel";
+import { useOrders } from "@/lib/useOrders";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
 import Disclaimer from "./Disclaimer";
 
@@ -94,6 +96,8 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [showBand, setShowBand] = useState(true);
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
+  const orders = useOrders();
+  const [orderDraft, setOrderDraft] = useState<OrderDraft | null>(null);
   const [dailyLimit, setDailyLimitState] = useState<number | null>(null);
   const [tab, setTab] = useState<TabId>("forecast");
   const [isDesktop, setIsDesktop] = useState(false);
@@ -118,6 +122,17 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     });
   };
   const tradeLog = useTrades();
+  const logTrade = (d: Omit<TradeDraft, "nonce" | "epic">) => {
+    setDraft({ ...d, epic, nonce: Date.now() });
+    changeTab("journal");
+    setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
+  };
+  // Positions are read when the Trade tab is opened (one call), not on a timer
+  const ordersEnabled = orders.state?.enabled === true;
+  const reloadOrders = orders.reload;
+  useEffect(() => {
+    if (activeTab === "trade" && ordersEnabled) reloadOrders();
+  }, [activeTab, ordersEnabled, reloadOrders]);
   const calendar = useCalendar();
   const priceAlerts = useAlerts();
   useEffect(() => {
@@ -488,12 +503,17 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             direction={forecast?.direction}
             decimals={decimals}
             applied={applied}
-            onLog={(d) => {
-              setDraft({ ...d, epic, nonce: Date.now() });
-              changeTab("journal");
-              setTimeout(() => document.getElementById("trades")?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
-            }}
+            onLog={logTrade}
+            onOrder={
+              orders.state?.enabled
+                ? (d) => {
+                    setOrderDraft({ ...d, epic, nonce: Date.now() });
+                    setTimeout(() => document.getElementById("order-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+                  }
+                : undefined
+            }
           />
+          <OrderPanel orders={orders} epic={epic} decimals={decimals} last={last?.close ?? null} draft={orderDraft} onLog={logTrade} />
           </div>
           <div role="tabpanel" id="panel-journal" aria-labelledby="tab-journal" className="tabpanel" hidden={activeTab !== "journal"}>
       <TradesPanel
@@ -532,7 +552,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           </div>
         </div>
       </div>
-      <footer className="foot">Outil personnel d’information, expérimental : il ne passe aucun ordre et ne constitue pas un conseil d’investissement.</footer>
+      <footer className="foot">Outil personnel d’information, expérimental : les ordres ne partent que vers le compte démo, après votre confirmation ; ce n’est pas un conseil d’investissement.</footer>
     </main>
   );
 }

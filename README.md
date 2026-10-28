@@ -1,8 +1,8 @@
 # Market Dashboard
 
-Dashboard personnel de suivi de marché, **en lecture seule** : graphique en bougies (Lightweight Charts de TradingView) alimenté par l'API Capital.com, avec une prévision expérimentale prolongée dans le futur. Next.js (App Router) + TypeScript, prévu pour Vercel.
+Dashboard personnel de suivi de marché, **en lecture seule par défaut** (les ordres sur compte démo sont une option désactivée, voir « Ordres sur compte démo ») : graphique en bougies (Lightweight Charts de TradingView) alimenté par l'API Capital.com, avec une prévision expérimentale prolongée dans le futur. Next.js (App Router) + TypeScript, prévu pour Vercel.
 
-> Aucune fonctionnalité de passage d'ordre. Le client Capital.com (`lib/capital.ts`) n'autorise que 4 appels : `POST /api/v1/session`, `GET /api/v1/prices/{epic}`, `GET /api/v1/markets/{epic}` et `GET /api/v1/clientsentiment` (part de clients acheteurs / vendeurs : donnée de marché publique). Tout autre appel est bloqué.
+> Les ordres sont **désactivés par défaut** et, même activés, **limités au compte démo** de Capital.com (voir « Ordres sur compte démo »). Hors de cette fonction, le client Capital.com (`lib/capital.ts`) n'autorise que 4 appels de lecture : `POST /api/v1/session`, `GET /api/v1/prices/{epic}`, `GET /api/v1/markets/{epic}` et `GET /api/v1/clientsentiment`. Aucun ordre en attente, aucune modification de compte, aucun retrait. Les identifiants Capital.com ne vivent que côté serveur (variables d'environnement, jamais commitées).
 
 ## Variables d'environnement
 
@@ -13,7 +13,8 @@ Copiez `.env.example` en `.env.local` (jamais commité) et renseignez :
 | `CAPITAL_API_KEY` | Clé API Capital.com (Paramètres → API) |
 | `CAPITAL_IDENTIFIER` | Identifiant (e-mail) du compte Capital.com |
 | `CAPITAL_API_PASSWORD` | Mot de passe **de la clé API** (défini à sa création) |
-| `CAPITAL_ENV` | `demo` (défaut) ou `live` |
+| `CAPITAL_ENV` | `demo` (défaut) ou `live` (lecture seule). Les ordres sont **refusés** dès que ce n'est pas `demo` |
+| `TRADING_ENABLED` | Optionnel : `true` pour activer les ordres sur le compte **démo**. Absent ou autre valeur : aucun ordre possible (interrupteur) |
 | `DASHBOARD_PASSWORD` | Mot de passe unique du site. S'il est absent, le site entier est verrouillé (503) |
 | `FORECAST_SERVICE_URL` | Optionnel : URL du service de prévision ML (`https://…/api/forecast`), voir `forecast-service/README.md` |
 | `BLOB_READ_WRITE_TOKEN` | Optionnel : ajouté automatiquement par Vercel quand un stockage Blob (privé) est relié au projet ; active le journal des prévisions |
@@ -123,11 +124,24 @@ Le backtest rejoue le passé ; le journal juge les prévisions **en conditions r
 
 ### Mes trades (journal réel)
 
-Le dashboard ne passe aucun ordre : vous notez vos trades à la main, soit depuis le bouton « Noter ce trade dans mon journal » du calculateur de risque (taille, stop et objectif déjà remplis), soit via le formulaire « Noter un trade ». À l'enregistrement, la prévision affichée (sens, confiance, modèle) est conservée avec le trade. Clôturez ensuite en indiquant le prix de sortie.
+Vous notez vos trades à la main (ou depuis un ordre démo, bouton « Noter dans mon journal ») : soit depuis le bouton « Noter ce trade dans mon journal » du calculateur de risque (taille, stop et objectif déjà remplis), soit via le formulaire « Noter un trade ». À l'enregistrement, la prévision affichée (sens, confiance, modèle) est conservée avec le trade. Clôturez ensuite en indiquant le prix de sortie.
 
 - **Stockage** : un fichier `trades/trades.json` dans le même stockage Blob privé que le journal des prévisions, mis à jour avec contrôle d'ETag ; 2 000 trades maximum. Routes : `GET/POST /api/trades`, `PATCH/DELETE /api/trades/[id]` (protégées par le mot de passe du site, validation stricte : le stop doit être du bon côté de l'entrée, etc.).
 - **Statistiques** : résultat total, réussite avec marge d'erreur (à partir de 20 trades clôturés), espérance en R (trades avec stop), pire creux, résultat du jour, courbe cumulée, part de trades avec stop, et comparaison « dans le sens du modèle » / « à contre-sens ».
 - **Perte maximale du jour** : montant à saisir dans le panneau (mémorisé sur l'appareil) ; une fois atteint, le feu passe au rouge.
+
+### Ordres sur compte démo
+
+Option **désactivée par défaut**. Pour l'activer : variable `TRADING_ENABLED=true` (Netlify : *Project configuration → Environment variables*, puis redéployer). Pour la couper : retirer la variable et redéployer.
+
+- **Démo uniquement, vérifié dans le code** : `assertDemoOnly()` (`lib/capital.ts`) refuse tout appel de trading si `CAPITAL_ENV` n'est pas `demo` ou si l'adresse visée est celle du compte réel. Les seuls appels de trading autorisés sont `POST /api/v1/positions`, `GET /api/v1/positions`, `DELETE /api/v1/positions/{dealId}` et `GET /api/v1/confirms/{ref}` (liste fermée, aucun ordre en attente).
+- **Jamais automatique** : le calculateur de risque propose « Préparer un ordre (compte démo) » ; le panneau « Ordre sur compte démo » (onglet Trade) pré-remplit sens, taille, stop et objectif. « Vérifier l'ordre » (`POST /api/orders/preview`) contrôle l'ordre sur le prix actuel et affiche un récapitulatif signé (prix estimé, valeur, perte max., gain visé) valable 2 minutes ; « Envoyer sur le compte démo » (`POST /api/orders`) n'accepte que ce récapitulatif, une seule fois, et revérifie tout juste avant l'envoi.
+- **Garde-fous** (`LIMITS` dans `lib/orders.ts`) : stop obligatoire et du bon côté du prix, objectif du bon côté, stop ni plus serré que le spread ni plus loin que 15 % ; valeur de position limitée à 25 000 $ ; 3 positions ouvertes au maximum ; même instrument et même sens refusés pendant 2 minutes (double clic) ; marché ouvert ; le prix ne doit pas avoir bougé de plus de 0,25 % depuis le récapitulatif.
+- **Fermer une position** : bouton « Fermer » en deux appuis (le premier arme le bouton 5 secondes). La fermeture reste possible même si les nouveaux ordres sont coupés.
+- **Si la réponse de Capital.com n'arrive pas**, l'appli le dit (« l'ordre a peut-être été envoyé ») au lieu de réessayer : vérifiez la liste des positions.
+- **Protection des routes** : derrière le mot de passe du site comme tout le reste, et en plus réservées aux requêtes venant des pages du site (en-tête `Origin` vérifié).
+- Les ordres ne sont pas enregistrés par l'appli (pas de dépendance au stockage) : « Noter dans mon journal » reporte l'ordre exécuté dans « Mes trades ».
+- Ce n'est pas un conseil d'investissement, et rien ici ne prouve qu'un signal est rentable : voir « Signal validé ».
 
 ### Feu « pas de trade maintenant »
 

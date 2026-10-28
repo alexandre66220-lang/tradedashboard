@@ -7,6 +7,9 @@ const SESSION_TTL_MS = Number(process.env.MOCK_SESSION_TTL_MS || 600000);
 const sessions = new Map();
 const stats = { session: 0, prices: 0, markets: 0, other: 0 };
 
+const positions = new Map();
+const deals = new Map();
+
 const BASE = { GOLD: 2650, OIL_CRUDE: 72, BTCUSD: 68000 };
 
 // The price path is a pure function of (epic, step, candle index), so that pages requested with from / to line up.
@@ -60,6 +63,13 @@ function series(epic, stepMin, n, fromSec, toSec) {
   }
   return out;
 }
+
+// Current quote: follows the last 5-minute candle (the chart default) so that levels taken from the chart make sense
+const quoteOf = (epic) => {
+  const mid = BASE[epic] ? pathFor(epic, 5).price : 2650;
+  const spread = Number(process.env.MOCK_SPREAD || 0.3);
+  return { bid: +(mid - spread / 2).toFixed(3), offer: +(mid + spread / 2).toFixed(3) };
+};
 
 const send = (res, status, body, headers = {}) => {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
@@ -123,7 +133,46 @@ http.createServer((req, res) => {
   }
   if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/markets\/(.+)$/))) {
     stats.markets++;
-    return send(res, 200, { instrument: { epic: m[1], name: "Gold" }, snapshot: { marketStatus: process.env.MOCK_STATUS || "TRADEABLE", bid: 2650, offer: 2650 + Number(process.env.MOCK_SPREAD || 0.3) } });
+    return send(res, 200, { instrument: { epic: m[1], name: "Gold" }, snapshot: { marketStatus: process.env.MOCK_STATUS || "TRADEABLE", ...quoteOf(m[1]) } });
+  }
+  // Demo trading (tests only): positions are kept in memory
+  if (url.pathname === "/api/v1/positions" && req.method === "GET") {
+    return send(res, 200, {
+      positions: [...positions.values()].map((p) => ({
+        position: { dealId: p.dealId, dealReference: p.ref, size: p.size, direction: p.direction, level: p.level, stopLevel: p.stopLevel ?? null, profitLevel: p.profitLevel ?? null, createdDateUTC: p.created, upl: 0, currency: "USD" },
+        market: { epic: p.epic, instrumentName: "Gold", ...quoteOf(p.epic) },
+      })),
+    });
+  }
+  if (url.pathname === "/api/v1/positions" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      stats.orders = (stats.orders || 0) + 1;
+      const b = JSON.parse(body || "{}");
+      const ref = "o_" + Math.random().toString(36).slice(2, 10);
+      if (process.env.MOCK_REJECT) deals.set(ref, { dealStatus: "REJECTED", reason: "INSUFFICIENT_FUNDS" });
+      else {
+        const dealId = "d_" + Math.random().toString(36).slice(2, 10);
+        const q = quoteOf(b.epic);
+        const level = b.direction === "BUY" ? q.offer : q.bid;
+        positions.set(dealId, { dealId, ref, epic: b.epic, size: b.size, direction: b.direction, level, stopLevel: b.stopLevel, profitLevel: b.profitLevel, created: new Date().toISOString().slice(0, 23) });
+        deals.set(ref, { dealStatus: "ACCEPTED", dealId, level });
+      }
+      send(res, 200, { dealReference: ref });
+    });
+    return;
+  }
+  if ((m = url.pathname.match(/^\/api\/v1\/positions\/(.+)$/)) && req.method === "DELETE") {
+    if (!positions.has(m[1])) return send(res, 404, { errorCode: "error.not-found.dealId" });
+    positions.delete(m[1]);
+    const ref = "c_" + Math.random().toString(36).slice(2, 10);
+    deals.set(ref, { dealStatus: "ACCEPTED", dealId: m[1], level: 2650 });
+    return send(res, 200, { dealReference: ref });
+  }
+  if (req.method === "GET" && (m = url.pathname.match(/^\/api\/v1\/confirms\/(.+)$/))) {
+    const d = deals.get(m[1]);
+    return d ? send(res, 200, { dealReference: m[1], ...d }) : send(res, 404, { errorCode: "error.not-found" });
   }
   stats.other++;
   send(res, 404, { errorCode: "error.not-found" });
