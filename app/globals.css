@@ -337,3 +337,6 @@ code { overflow-wrap: anywhere; }
 .ctx-block { margin-top: 10px; }
 .ctx-block + .ctx-block, .ctx-block + p { margin-top: 12px; }
 .ctx-block .stats { margin: 6px 0; }
+.clock-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.clock-list li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.clock-list .hdot { align-self: center; flex: none; }

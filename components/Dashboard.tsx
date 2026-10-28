@@ -30,6 +30,7 @@ import OutlookPanel from "./OutlookPanel";
 import RiskCalculator from "./RiskCalculator";
 import OrderPanel, { type OrderDraft } from "./OrderPanel";
 import ContextPanel from "./ContextPanel";
+import MarketClock from "./MarketClock";
 import { useMarketContext } from "@/lib/useMarketContext";
 import { useOrders } from "@/lib/useOrders";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
@@ -139,6 +140,16 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, ordersEnabled, reloadOrders]);
   const calendar = useCalendar();
+  // An announcement close in time: said in the risk calculator, with the advice to cut the size or wait
+  const newsNote = useMemo(() => {
+    if (!calendar.events) return null;
+    const soon = relevantEvents(calendar.events, instrument, Math.floor(Date.now() / 1000), -15, 90).filter((e) => e.impact === "high");
+    if (!soon.length) return null;
+    const e = soon[0];
+    const when = e.minutesFromNow >= 0 ? `dans ${Math.round(e.minutesFromNow)} min` : `il y a ${Math.round(-e.minutesFromNow)} min`;
+    return `Annonce majeure « ${e.title} » ${when} : le prix peut sauter et sauter votre stop. Réduisez la taille de moitié, ou attendez.`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendar.events, instrument, Math.floor(Date.now() / 60_000)]);
   const priceAlerts = useAlerts();
   useEffect(() => {
     const v = Number(readRaw("lim:daily") || NaN);
@@ -489,6 +500,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
           />
           <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
           <ContextPanel data={marketContext} direction={forecast?.direction} />
+          <MarketClock />
           <CompareChart selected={epic} onSelect={selectEpic} />
           </div>
           <div role="tabpanel" id="panel-trade" aria-labelledby="tab-trade" className="tabpanel" hidden={activeTab !== "trade"}>
@@ -510,6 +522,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             decimals={decimals}
             applied={applied}
             onLog={logTrade}
+            newsNote={newsNote}
             onOrder={
               orders.state?.enabled
                 ? (d) => {

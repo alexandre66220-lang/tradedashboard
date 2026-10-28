@@ -1,5 +1,6 @@
 import type { Candle, ForecastResponse } from "../types";
 import { cotRelation, fundingRelation } from "../context/types";
+import { sessionAt } from "../sessions";
 import type { JournalStorage } from "./storage";
 import { SESSIONS, type CurvePoint, type CrowdFadeGroup, type SessionKey, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
 
@@ -339,14 +340,10 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
       strat[e.sim.exit]++;
     }
     if (e.resMinutes < 1440) {
-      const hour = new Date(e.t * 1000).getUTCHours();
-      const part = SESSIONS.find((x) => hour >= x.from && hour < x.to);
-      if (part) {
-        const g = bySession[part.key];
-        g.n++;
-        g.hits += (e.direction === "up") === up ? 1 : 0;
-        g.net += sign * (e.outcome / e.ref - 1) - cost;
-      }
+      const g = bySession[sessionAt(e.t * 1000)];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+      g.net += sign * (e.outcome / e.ref - 1) - cost;
     }
     upHits += up ? 1 : 0;
     lastHits += e.ref - e.prev >= 0 === up ? 1 : 0;

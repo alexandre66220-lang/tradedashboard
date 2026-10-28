@@ -75,11 +75,11 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
       )}
       {SESSIONS.some((x) => st.bySession[x.key].hit.samples > 0) && (
         <p className="muted small">
-          Selon le moment de la journée (heures UTC, Paris = UTC+1 ou +2) :{" "}
+          Selon la séance en cours (heures d’ouverture réelles de Tokyo, Londres et New York, heure d’été comprise) :{" "}
           {SESSIONS.filter((x) => st.bySession[x.key].hit.samples > 0)
             .map((x) => {
               const g = st.bySession[x.key];
-              return `${x.label} ${x.from}–${x.to} h : ${fmtHit(g.hit)}${g.hit.hitRate != null ? ` (${fmtPct(g.netReturnPct)} net)` : ""}`;
+              return `${x.label} : ${fmtHit(g.hit)}${g.hit.hitRate != null ? ` (${fmtPct(g.netReturnPct)} net)` : ""}`;
             })
             .join(" · ")}
           .

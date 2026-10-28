@@ -16,6 +16,8 @@ interface Props {
   applied?: AppliedLevels | null;
   /** Sends the sized position to the trade log form */
   onLog?: (d: Omit<TradeDraft, "nonce" | "epic">) => void;
+  /** A line about an announcement close in time for this instrument, with advice on size */
+  newsNote?: string | null;
   /** Sends the sized position to the order panel (demo account); only given when orders are switched on */
   onOrder?: (d: { side: "long" | "short"; size: number; stop: number; target: number }) => void;
 }
@@ -38,7 +40,7 @@ function save(key: string, value: string) {
 const num = (s: string) => Number(s.replace(",", "."));
 const money = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 
-export default function RiskCalculator({ epic, last, atr, direction, decimals, applied, onLog, onOrder }: Props) {
+export default function RiskCalculator({ epic, last, atr, direction, decimals, applied, onLog, onOrder, newsNote }: Props) {
   const [capital, setCapital] = useState("1000");
   const [riskPct, setRiskPct] = useState("1");
   const [ratio, setRatio] = useState("2");
@@ -165,6 +167,7 @@ export default function RiskCalculator({ epic, last, atr, direction, decimals, a
               Préparer un ordre (compte démo)
             </button>
           )}
+          {newsNote && <p className="rc-warn">{newsNote}</p>}
           {res.warnings.map((w) => (
             <p key={w} className="rc-warn">
               {w}
