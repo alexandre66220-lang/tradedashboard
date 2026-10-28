@@ -5,7 +5,7 @@ export const SESSION_MAX_AGE = 30 * 24 * 3600;
 
 const encoder = new TextEncoder();
 
-async function hmacHex(key: string, message: string): Promise<string> {
+export async function hmacHex(key: string, message: string): Promise<string> {
   const k = await crypto.subtle.importKey("raw", encoder.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", k, encoder.encode(message));
   return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");

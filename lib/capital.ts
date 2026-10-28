@@ -2,9 +2,10 @@ import "server-only";
 import type { Candle, MarketStatus } from "./types";
 
 /**
- * Minimal, READ-ONLY Capital.com client.
- * Only four calls are allowed: session creation, market details, price history and client sentiment.
- * No trading endpoint (positions, workingorders, confirms...) is implemented or reachable.
+ * Minimal Capital.com client.
+ * Reading: session creation, market details, price history and client sentiment.
+ * Trading (DEMO ACCOUNT ONLY, see `assertDemoOnly`): open / list / close a position and read a deal confirmation.
+ * Nothing else is reachable (no working orders, no account changes, no withdrawals).
  */
 
 const BASE_URLS = {
@@ -31,6 +32,7 @@ export type CapitalErrorCode =
   | "AUTH_FAILED"
   | "RATE_LIMITED"
   | "UPSTREAM_UNREACHABLE"
+  | "TRADING_REFUSED"
   | "UNKNOWN_EPIC"
   | "NO_DATA"
   | "UPSTREAM_ERROR";
@@ -383,14 +385,19 @@ export interface MarketQuote {
   offer: number | null;
 }
 
-export function getMarketQuote(epic: string): Promise<MarketQuote> {
-  return cached(`quote|${epic}`, STATUS_TTL_MS, async () => {
-    const data = await apiGet<{ snapshot?: { marketStatus?: string; bid?: number; offer?: number } }>(`/api/v1/markets/${encodeURIComponent(epic)}`);
-    const snap = data.snapshot;
-    const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
-    return { status: snap?.marketStatus ?? "UNKNOWN", bid: ok(snap?.bid) ? snap.bid : null, offer: ok(snap?.offer) ? snap.offer : null };
-  });
+async function fetchQuote(epic: string): Promise<MarketQuote> {
+  const data = await apiGet<{ snapshot?: { marketStatus?: string; bid?: number; offer?: number } }>(`/api/v1/markets/${encodeURIComponent(epic)}`);
+  const snap = data.snapshot;
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+  return { status: snap?.marketStatus ?? "UNKNOWN", bid: ok(snap?.bid) ? snap.bid : null, offer: ok(snap?.offer) ? snap.offer : null };
 }
+
+export function getMarketQuote(epic: string): Promise<MarketQuote> {
+  return cached(`quote|${epic}`, STATUS_TTL_MS, () => fetchQuote(epic));
+}
+
+/** Never cached: the price an order is checked against must be the current one. */
+export const getFreshQuote = fetchQuote;
 
 export async function getMarketStatus(epic: string): Promise<MarketStatus> {
   return (await getMarketQuote(epic)).status;
@@ -453,4 +460,180 @@ export function __resetCapitalState() {
   session = null;
   loginInFlight = null;
   cache.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Trading: DEMO ACCOUNT ONLY. Every function below refuses to run unless CAPITAL_ENV is "demo" (the default) and the
+// target is not the live host; the server-side rules (switch, limits, confirmation) live in lib/orders.ts.
+
+const TRADING_ALLOWED = [
+  { method: "POST", path: /^\/api\/v1\/positions$/ },
+  { method: "GET", path: /^\/api\/v1\/positions$/ },
+  { method: "DELETE", path: /^\/api\/v1\/positions\/[A-Za-z0-9._-]+$/ },
+  { method: "GET", path: /^\/api\/v1\/confirms\/[A-Za-z0-9._-]+$/ },
+];
+
+export function assertDemoOnly() {
+  const refuse = () => {
+    throw new CapitalError("TRADING_REFUSED", "Ordres refusés : seul le compte démo est autorisé (CAPITAL_ENV doit rester « demo »).", 403);
+  };
+  if (capitalEnv() !== "demo") refuse();
+  const base = process.env.CAPITAL_BASE_URL || BASE_URLS.demo;
+  try {
+    if (new URL(base).host === new URL(BASE_URLS.live).host) refuse();
+  } catch (err) {
+    if (err instanceof CapitalError) throw err;
+    refuse();
+  }
+}
+
+async function apiTrade<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+  assertDemoOnly();
+  if (!TRADING_ALLOWED.some((a) => a.method === method && a.path.test(path))) {
+    throw new Error(`Blocked Capital.com call: ${method} ${path}`);
+  }
+  const { apiKey, baseUrl } = config();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const s = await getSession(attempt > 0);
+    const res = await withSlot(() =>
+      rawFetch(baseUrl + path, {
+        method,
+        headers: { "X-CAP-API-KEY": apiKey, CST: s.cst, "X-SECURITY-TOKEN": s.securityToken, "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+    );
+    // An expired session means the request was not processed: logging in again and sending it once more is safe
+    if (res.status === 401 && attempt === 0) {
+      session = null;
+      continue;
+    }
+    if (res.ok) {
+      s.lastUsed = Date.now();
+      return (await res.json()) as T;
+    }
+    const code = await readErrorCode(res);
+    console.warn(`[capital] ${method} ${path} failed: status=${res.status} code=${code}`);
+    if (res.status === 429) throw new CapitalError("RATE_LIMITED", "Trop de requêtes vers Capital.com : réessayez dans quelques secondes.", 429);
+    if (res.status === 401) throw new CapitalError("AUTH_FAILED", `Session Capital.com refusée (${code}).`, 502);
+    if (res.status >= 500) throw new CapitalError("UPSTREAM_ERROR", `Capital.com a répondu une erreur (${res.status}) : vérifiez vos positions avant de réessayer.`, 502);
+    throw new CapitalError("UPSTREAM_ERROR", `Refusé par Capital.com (${code}).`, 502, code);
+  }
+  throw new CapitalError("AUTH_FAILED", "Session Capital.com refusée après reconnexion.", 502);
+}
+
+export interface OpenPosition {
+  dealId: string;
+  epic: string;
+  name: string;
+  direction: "BUY" | "SELL";
+  size: number;
+  level: number;
+  stopLevel: number | null;
+  profitLevel: number | null;
+  /** Unrealised profit / loss in the account currency */
+  upl: number | null;
+  currency: string | null;
+  /** Opening time (ms) */
+  createdAt: number | null;
+  bid: number | null;
+  offer: number | null;
+}
+
+const finite = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Reads { positions: [{ position: {...}, market: {...} }] }; rows that do not look right are skipped, never guessed. */
+export function parsePositions(data: unknown): OpenPosition[] {
+  const list = (data as { positions?: unknown } | null)?.positions;
+  if (!Array.isArray(list)) return [];
+  const out: OpenPosition[] = [];
+  for (const row of list as Array<{ position?: Record<string, unknown>; market?: Record<string, unknown> }>) {
+    const p = row?.position;
+    const m = row?.market;
+    const size = finite(p?.size);
+    const level = finite(p?.level);
+    const direction = p?.direction === "BUY" || p?.direction === "SELL" ? p.direction : null;
+    if (typeof p?.dealId !== "string" || typeof m?.epic !== "string" || size === null || level === null || !direction) continue;
+    const created = typeof p.createdDateUTC === "string" ? parseUtc(p.createdDateUTC) * 1000 : NaN; // parseUtc gives seconds
+    out.push({
+      dealId: p.dealId,
+      epic: m.epic,
+      name: typeof m.instrumentName === "string" ? m.instrumentName : m.epic,
+      direction,
+      size,
+      level,
+      stopLevel: finite(p.stopLevel),
+      profitLevel: finite(p.profitLevel),
+      upl: finite(p.upl),
+      currency: typeof p.currency === "string" ? p.currency : null,
+      createdAt: Number.isFinite(created) ? created : null,
+      bid: finite(m.bid),
+      offer: finite(m.offer),
+    });
+  }
+  return out;
+}
+
+export async function listPositions(): Promise<OpenPosition[]> {
+  return parsePositions(await apiTrade<unknown>("GET", "/api/v1/positions"));
+}
+
+export interface PositionRequest {
+  epic: string;
+  direction: "BUY" | "SELL";
+  size: number;
+  stopLevel: number;
+  profitLevel?: number;
+}
+
+export interface DealConfirmation {
+  dealReference: string;
+  accepted: boolean;
+  /** Why Capital.com refused, when it did */
+  reason: string | null;
+  dealId: string | null;
+  level: number | null;
+}
+
+/** An answer that never came may still have opened the position: the caller must say so rather than retry. */
+const UNKNOWN_OUTCOME = "Pas de réponse de Capital.com : l'ordre a peut-être été envoyé. Vérifiez la liste des positions avant de réessayer.";
+
+async function sendDeal(method: "POST" | "DELETE", path: string, body?: unknown): Promise<string> {
+  try {
+    const res = await apiTrade<{ dealReference?: unknown }>(method, path, body);
+    if (typeof res?.dealReference !== "string" || !/^[A-Za-z0-9._-]+$/.test(res.dealReference)) {
+      throw new CapitalError("UPSTREAM_ERROR", "Réponse de Capital.com inattendue : vérifiez la liste des positions.", 502);
+    }
+    return res.dealReference;
+  } catch (err) {
+    if (err instanceof CapitalError && err.code === "UPSTREAM_UNREACHABLE") throw new CapitalError("UPSTREAM_UNREACHABLE", UNKNOWN_OUTCOME, 504);
+    throw err;
+  }
+}
+
+export async function openPosition(req: PositionRequest): Promise<string> {
+  return sendDeal("POST", "/api/v1/positions", {
+    epic: req.epic,
+    direction: req.direction,
+    size: req.size,
+    guaranteedStop: false,
+    stopLevel: req.stopLevel,
+    ...(req.profitLevel !== undefined ? { profitLevel: req.profitLevel } : {}),
+  });
+}
+
+export async function closePositionDeal(dealId: string): Promise<string> {
+  return sendDeal("DELETE", `/api/v1/positions/${encodeURIComponent(dealId)}`);
+}
+
+/** The broker's verdict on a deal reference (accepted or rejected, and at what level). */
+export async function getConfirmation(dealReference: string): Promise<DealConfirmation> {
+  const d = await apiTrade<Record<string, unknown>>("GET", `/api/v1/confirms/${encodeURIComponent(dealReference)}`);
+  const accepted = d.dealStatus === "ACCEPTED";
+  return {
+    dealReference,
+    accepted,
+    reason: accepted ? null : typeof d.reason === "string" ? d.reason : "REFUSED",
+    dealId: typeof d.dealId === "string" ? d.dealId : null,
+    level: finite(d.level),
+  };
 }

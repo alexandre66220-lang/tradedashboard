@@ -16,6 +16,8 @@ interface Props {
   applied?: AppliedLevels | null;
   /** Sends the sized position to the trade log form */
   onLog?: (d: Omit<TradeDraft, "nonce" | "epic">) => void;
+  /** Sends the sized position to the order panel (demo account); only given when orders are switched on */
+  onOrder?: (d: { side: "long" | "short"; size: number; stop: number; target: number }) => void;
 }
 
 function load(key: string, fallback: string): string {
@@ -36,7 +38,7 @@ function save(key: string, value: string) {
 const num = (s: string) => Number(s.replace(",", "."));
 const money = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 
-export default function RiskCalculator({ epic, last, atr, direction, decimals, applied, onLog }: Props) {
+export default function RiskCalculator({ epic, last, atr, direction, decimals, applied, onLog, onOrder }: Props) {
   const [capital, setCapital] = useState("1000");
   const [riskPct, setRiskPct] = useState("1");
   const [ratio, setRatio] = useState("2");
@@ -153,6 +155,14 @@ export default function RiskCalculator({ epic, last, atr, direction, decimals, a
               }
             >
               Noter ce trade dans mon journal
+            </button>
+          )}
+          {onOrder && last != null && (
+            <button
+              className="sl-apply"
+              onClick={() => onOrder({ side, size: res.units, stop: Number(res.stop.toFixed(decimals)), target: Number(res.takeProfit.toFixed(decimals)) })}
+            >
+              Préparer un ordre (compte démo)
             </button>
           )}
           {res.warnings.map((w) => (
