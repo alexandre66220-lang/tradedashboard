@@ -17,7 +17,7 @@ describe("proxy (password gate)", () => {
   });
 
   it("lets the schedulers reach the cron routes (they check their own secret)", async () => {
-    for (const path of ["/api/journal/record", "/api/alerts/check", "/api/backup/run"]) expect((await call(path)).headers.get("x-middleware-next"), path).toBe("1");
+    for (const path of ["/api/journal/record", "/api/alerts/check", "/api/backup/run", "/.netlify/functions/journal-record-background"]) expect((await call(path)).headers.get("x-middleware-next"), path).toBe("1");
   });
 
   it("keeps everything else behind the password", async () => {
@@ -26,6 +26,8 @@ describe("proxy (password gate)", () => {
     expect((await call("/api/outlook/cell?epic=GOLD&key=day")).status).toBe(401);
     expect((await call("/api/journal/signal")).status).toBe(401);
     expect((await call("/api/backup")).status).toBe(401); // downloading or restoring a backup needs the password
+    // the other Netlify functions are not for visitors (they only start the scheduled work)
+    for (const f of ["cron-alerts", "cron-journal", "cron-journal-daily", "cron-backup"]) expect((await call(`/.netlify/functions/${f}`)).status, f).toBe(307);
   });
 
   it("locks the whole site when no password is configured", async () => {

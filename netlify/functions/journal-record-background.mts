@@ -22,6 +22,7 @@ export default async (req: Request, context: { site?: { url?: string } }) => {
   }
   // "intraday" (every 30 min) or "daily" (daily and weekly outlooks, once a day); anything else records everything
   const asked = new URL(req.url).searchParams.get("scope");
+  console.log(`[journal-record] started (${asked ?? "all"})`);
   const scope = asked === "intraday" || asked === "daily" ? `?scope=${asked}` : "";
   try {
     const res = await fetch(`${site}/api/journal/record${scope}`, {
