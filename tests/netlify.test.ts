@@ -71,7 +71,7 @@ describe("Netlify scheduled functions", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("recorder refuses a caller without the secret and records for the right one", async () => {
+  it("recorder refuses a caller without the secret and records everything at once when no scope is given", async () => {
     const fetchMock = vi.fn(async () => new Response('{"jobs":9,"failed":0}', { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await record(req(), ctx);
@@ -80,9 +80,36 @@ describe("Netlify scheduled functions", () => {
     await record(req("Bearer s3cret"), ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record");
-    await record(new Request("https://dash.example.app/x?scope=intraday", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
     await record(new Request("https://dash.example.app/x?scope=%22evil", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
-    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record?scope=intraday");
-    expect((fetchMock.mock.calls[2] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record"); // unknown scope: ignored
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("https://dash.example.app/api/journal/record"); // unknown scope: ignored
+  });
+
+  it("recorder asks for the plan, then for each forecast in its own request, two at a time", async () => {
+    const calls = ["scope=intraday&epic=GOLD", "scope=intraday&epic=BTCUSD", "scope=intraday&epic=US100", "bad call;rm"];
+    let running = 0, peak = 0;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (String(url).includes("plan=intraday")) return new Response(JSON.stringify({ calls }), { status: 200 });
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running--;
+      return new Response("{}", { status: String(url).includes("US100") ? 500 : 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const log = vi.mocked(console.log);
+    await record(new Request("https://dash.example.app/x?scope=intraday", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls[0]).toBe("https://dash.example.app/api/journal/record?plan=intraday");
+    expect(urls.slice(1).sort()).toEqual(calls.slice(0, 3).map((c) => `https://dash.example.app/api/journal/record?${c}`).sort()); // the odd one is dropped
+    expect(fetchMock.mock.calls.every((c) => (c[1] as RequestInit).headers && ((c[1] as RequestInit).headers as Record<string, string>).Authorization === "Bearer s3cret")).toBe(true);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/done \(intraday\): 2 recorded, 1 failed/);
+  });
+
+  it("recorder stops quietly when the plan cannot be read", async () => {
+    const fetchMock = vi.fn(async () => new Response("<html>login</html>", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(record(new Request("https://dash.example.app/x?scope=daily", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
