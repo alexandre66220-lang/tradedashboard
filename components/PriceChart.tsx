@@ -15,6 +15,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { bollinger, ema, fibRetracement, rsi } from "@/lib/indicators";
+import { volumeProfile } from "@/lib/profile";
 import type { Candle, ForecastResponse } from "@/lib/types";
 
 const COLORS = {
@@ -29,6 +30,8 @@ export interface Overlays {
   boll: boolean;
   rsi: boolean;
   fib: boolean;
+  /** Point of control and value area of the day's volume profile */
+  profile: boolean;
 }
 
 interface Props {
@@ -38,6 +41,8 @@ interface Props {
   showBand: boolean;
   /** Changes when instrument/timeframe changes, to re-fit the view */
   viewKey: string;
+  /** Minutes per candle, to size the day's volume profile */
+  resMinutes: number;
 }
 
 const t = (s: number) => s as UTCTimestamp;
@@ -48,7 +53,7 @@ function formatTime(time: Time, withDate: boolean) {
   return withDate ? `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${hm}` : hm;
 }
 
-const NO_OVERLAYS: Overlays = { ma: false, boll: false, rsi: false, fib: false };
+const NO_OVERLAYS: Overlays = { ma: false, boll: false, rsi: false, fib: false, profile: false };
 
 interface OverlayRefs {
   ema20?: ISeriesApi<"Line">;
@@ -58,9 +63,10 @@ interface OverlayRefs {
   bbL?: ISeriesApi<"Line">;
   rsi?: ISeriesApi<"Line">;
   fibLines: IPriceLine[];
+  profileLines: IPriceLine[];
 }
 
-export default function PriceChart({ candles, forecast, showBand, viewKey, overlays = NO_OVERLAYS }: Props) {
+export default function PriceChart({ candles, forecast, showBand, viewKey, resMinutes, overlays = NO_OVERLAYS }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<{
@@ -70,7 +76,7 @@ export default function PriceChart({ candles, forecast, showBand, viewKey, overl
     low: ISeriesApi<"Line">;
   } | null>(null);
   const fittedKey = useRef<string | null>(null);
-  const overlayRef = useRef<OverlayRefs>({ fibLines: [] });
+  const overlayRef = useRef<OverlayRefs>({ fibLines: [], profileLines: [] });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -124,7 +130,7 @@ export default function PriceChart({ candles, forecast, showBand, viewKey, overl
       chartRef.current = null;
       seriesRef.current = null;
       fittedKey.current = null;
-      overlayRef.current = { fibLines: [] };
+      overlayRef.current = { fibLines: [], profileLines: [] };
     };
   }, []);
 
@@ -218,7 +224,22 @@ export default function PriceChart({ candles, forecast, showBand, viewKey, overl
         );
       }
     }
-  }, [candles, overlays]);
+
+    for (const l of o.profileLines) s.candles.removePriceLine(l);
+    o.profileLines = [];
+    if (overlays.profile) {
+      const p = volumeProfile(candles, resMinutes);
+      if (p) {
+        const line = (price: number, title: string, color: string, width: 1 | 2, style: LineStyle) =>
+          s.candles.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title });
+        o.profileLines = [
+          line(p.poc, "POC", "rgba(255,167,38,0.95)", 2, LineStyle.Solid),
+          line(p.vah, "VAH", "rgba(41,182,246,0.8)", 1, LineStyle.Dashed),
+          line(p.val, "VAL", "rgba(41,182,246,0.8)", 1, LineStyle.Dashed),
+        ];
+      }
+    }
+  }, [candles, overlays, resMinutes]);
 
   useEffect(() => {
     seriesRef.current?.high.applyOptions({ visible: showBand });

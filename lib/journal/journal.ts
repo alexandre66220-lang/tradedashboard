@@ -1,6 +1,7 @@
 import type { Candle, ForecastResponse } from "../types";
 import { cotRelation, fundingRelation } from "../context/types";
 import { sessionAt } from "../sessions";
+import { valueRelation } from "../profile";
 import type { JournalStorage } from "./storage";
 import { SESSIONS, type CurvePoint, type CrowdFadeGroup, type SessionKey, CrowdFadeStats, JournalEntry, JournalHit, JournalStats, ModelFamily } from "./types";
 
@@ -124,7 +125,7 @@ export async function recordForecast(
   now = Date.now(),
   sentimentLong?: number | null,
   news?: boolean,
-  readings?: { confluence?: JournalEntry["confluence"]; nearFib?: boolean; atr?: number; spreadBps?: number; regime?: JournalEntry["regime"]; deriv?: JournalEntry["deriv"]; cot?: number },
+  readings?: { confluence?: JournalEntry["confluence"]; nearFib?: boolean; atr?: number; spreadBps?: number; regime?: JournalEntry["regime"]; deriv?: JournalEntry["deriv"]; cot?: number; va?: JournalEntry["va"] },
 ): Promise<boolean> {
   const last = candles.at(-1);
   const target = forecast.points.at(-1)?.value;
@@ -161,6 +162,7 @@ export async function recordForecast(
     ...(readings?.regime ? { regime: readings.regime } : {}),
     ...(readings?.deriv && Number.isFinite(readings.deriv.funding) ? { deriv: readings.deriv } : {}),
     ...(typeof readings?.cot === "number" && Number.isFinite(readings.cot) ? { cot: readings.cot } : {}),
+    ...(readings?.va ? { va: readings.va } : {}),
   };
   let wrote: boolean;
   try {
@@ -256,6 +258,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
   const byNews = { near: { hits: 0, n: 0 }, calm: { hits: 0, n: 0 } };
   const byConfluence = { low: { hits: 0, n: 0 }, mid: { hits: 0, n: 0 }, high: { hits: 0, n: 0 } };
   const byFib = { near: { hits: 0, n: 0 }, away: { hits: 0, n: 0 } };
+  const byValue = { inside: { hits: 0, n: 0 }, toward: { hits: 0, n: 0 }, away: { hits: 0, n: 0 } };
   const byFunding = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
   const byCot = { with: { hits: 0, n: 0 }, against: { hits: 0, n: 0 }, neutral: { hits: 0, n: 0 } };
   const bySession = Object.fromEntries(SESSIONS.map((x) => [x.key, { hits: 0, n: 0, net: 0 }])) as Record<SessionKey, { hits: number; n: number; net: number }>;
@@ -288,6 +291,11 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     hits += (e.direction === "up") === up ? 1 : 0;
     if (e.sentiment !== undefined) {
       const g = crowd[crowdRelation(e.direction, e.sentiment)];
+      g.n++;
+      g.hits += (e.direction === "up") === up ? 1 : 0;
+    }
+    if (e.va) {
+      const g = byValue[valueRelation(e.direction, e.va)];
       g.n++;
       g.hits += (e.direction === "up") === up ? 1 : 0;
     }
@@ -363,6 +371,7 @@ export function computeStats(entries: JournalEntry[], spreadBps: (epic: string) 
     bySentiment: { with: hit(crowd.with.hits, crowd.with.n), against: hit(crowd.against.hits, crowd.against.n), neutral: hit(crowd.neutral.hits, crowd.neutral.n) },
     bySession: Object.fromEntries(SESSIONS.map((x) => [x.key, { hit: hit(bySession[x.key].hits, bySession[x.key].n), netReturnPct: bySession[x.key].net * 100 }])) as JournalStats["bySession"],
     byConfluence: { low: hit(byConfluence.low.hits, byConfluence.low.n), mid: hit(byConfluence.mid.hits, byConfluence.mid.n), high: hit(byConfluence.high.hits, byConfluence.high.n) },
+    byValue: { inside: hit(byValue.inside.hits, byValue.inside.n), toward: hit(byValue.toward.hits, byValue.toward.n), away: hit(byValue.away.hits, byValue.away.n) },
     byFunding: { with: hit(byFunding.with.hits, byFunding.with.n), against: hit(byFunding.against.hits, byFunding.against.n), neutral: hit(byFunding.neutral.hits, byFunding.neutral.n) },
     byCot: { with: hit(byCot.with.hits, byCot.with.n), against: hit(byCot.against.hits, byCot.against.n), neutral: hit(byCot.neutral.hits, byCot.neutral.n) },
     byFib: { near: hit(byFib.near.hits, byFib.near.n), away: hit(byFib.away.hits, byFib.away.n) },
