@@ -61,6 +61,12 @@ function ModelBlock({ family, st }: { family: ModelFamily; st: JournalStats }) {
           {fmtHit(st.bySentiment.against)} · foule partagée {fmtHit(st.bySentiment.neutral)}.
         </p>
       )}
+      {st.byValue.inside.samples + st.byValue.toward.samples + st.byValue.away.samples > 0 && (
+        <p className="muted small">
+          Selon la position du prix par rapport à la zone de valeur du jour (théorie des enchères) : dans la zone {fmtHit(st.byValue.inside)} · prévision de
+          retour vers la zone {fmtHit(st.byValue.toward)} · prévision qui s’en éloigne {fmtHit(st.byValue.away)}.
+        </p>
+      )}
       {st.byFunding.with.samples + st.byFunding.against.samples + st.byFunding.neutral.samples > 0 && (
         <p className="muted small">
           Selon le positionnement des dérivés Bitcoin (funding) : prévision dans le sens de la foule {fmtHit(st.byFunding.with)} · à contre-courant{" "}

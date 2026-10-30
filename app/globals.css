@@ -340,3 +340,8 @@ code { overflow-wrap: anywhere; }
 .clock-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
 .clock-list li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .clock-list .hdot { align-self: center; flex: none; }
+.vp-svg { width: 100%; height: auto; max-height: 190px; display: block; margin: 8px 0; background: rgba(255,255,255,.02); border-radius: 6px; }
+.vp-bar { fill: rgba(149,152,161,.55); }
+.vp-va { fill: rgba(41,182,246,.12); }
+.vp-poc { stroke: rgba(255,167,38,.95); stroke-width: 1.5; }
+.vp-last { stroke: #d1d4dc; stroke-width: 1; stroke-dasharray: 3 3; }

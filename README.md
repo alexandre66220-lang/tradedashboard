@@ -167,6 +167,13 @@ Panneau « Positionnement du marché » (onglet Prévision) et lignes dans le jo
 - Le calculateur de risque affiche la même mise en garde (réduire la taille de moitié ou attendre) quand une annonce majeure approche.
 - **Écartées** : jours fériés (Nager.Date, The Calendar) : le statut du marché de Capital.com dit déjà si un marché est fermé ; actualités RSS (Noozra) : il faudrait noter chaque titre avec un modèle de langage, et rien ne permet aujourd'hui de mesurer si ça aiderait.
 
+### Profil de volume (théorie des enchères)
+
+- **Quoi** (`lib/profile.ts`) : où le prix a passé son volume sur la dernière journée de bougies (hors bougie en cours) : **POC** (le prix le plus échangé), **zone de valeur** (la bande autour du POC qui contient ≈ 70 % du volume ; haut VAH, bas VAL) et la position du prix : dans la zone (« équilibre ») ou au-dessus / en dessous (« déséquilibre »). Calcul : 40 tranches de prix, le volume de chaque bougie réparti sur les tranches qu'elle traverse, zone de valeur élargie à partir du POC en prenant à chaque pas le côté le plus actif.
+- **Où** : bouton « Profil » sous le graphique (lignes POC, VAH, VAL) et panneau « Profil de volume (AMT) » (onglet Prévision) avec l'histogramme, les niveaux et la lecture.
+- **Limite importante** : le volume d'un CFD est un volume « de ticks » (combien de fois le prix a bougé), pas des quantités échangées en bourse : ce n'est pas du vrai flux d'ordres. Sans aucun volume, le profil compte le temps passé à chaque prix (le Market Profile classique) et le panneau l'indique.
+- **Mesuré, pas supposé** : chaque prévision courte enregistre où se trouvait le prix par rapport à la zone de valeur ; le journal affiche la réussite quand la prévision est « dans la zone », « vers la zone » (retour à la valeur) ou « s'en éloigne » (le marché accepte les nouveaux prix). Si rien ne ressort après quelques semaines, l'idée sera abandonnée.
+
 ### Feu « pas de trade maintenant »
 
 Pastille sous le prix, toujours informative (rien n'est bloqué) :

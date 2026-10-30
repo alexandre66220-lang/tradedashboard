@@ -31,6 +31,7 @@ import RiskCalculator from "./RiskCalculator";
 import OrderPanel, { type OrderDraft } from "./OrderPanel";
 import ContextPanel from "./ContextPanel";
 import MarketClock from "./MarketClock";
+import VolumeProfilePanel from "./VolumeProfilePanel";
 import { useMarketContext } from "@/lib/useMarketContext";
 import { useOrders } from "@/lib/useOrders";
 import SlTpAdvisor, { type AppliedLevels } from "./SlTpAdvisor";
@@ -95,7 +96,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
   const [resolution, setResolution] = useState<ResolutionKey>(DEFAULT_RESOLUTION);
   const [horizon, setHorizon] = useState(instrument.defaultHorizon);
   const [compact, setCompact] = useState(false);
-  const [overlays, setOverlays] = useState<Overlays>({ ma: false, boll: false, rsi: false, fib: false });
+  const [overlays, setOverlays] = useState<Overlays>({ ma: false, boll: false, rsi: false, fib: false, profile: false });
   const [showBand, setShowBand] = useState(true);
   const [applied, setApplied] = useState<AppliedLevels | null>(null);
   const [draft, setDraft] = useState<TradeDraft | null>(null);
@@ -178,6 +179,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
       boll: readPref<string>("ov:boll", "0", ["0", "1"]) === "1",
       rsi: readPref<string>("ov:rsi", "0", ["0", "1"]) === "1",
       fib: readPref<string>("ov:fib", "0", ["0", "1"]) === "1",
+      profile: readPref<string>("ov:profile", "0", ["0", "1"]) === "1",
     });
     const e = readPref("epic", instruments[0].epic, instruments.map((i) => i.epic));
     setEpic(e);
@@ -412,6 +414,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             ["boll", "Bollinger"],
             ["rsi", "RSI"],
             ["fib", "Fibonacci"],
+            ["profile", "Profil"],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -432,7 +435,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
       <div className="layout">
         <div className="chart-box">
           {loading && candles.length === 0 && !error && <div className="overlay">Chargement…</div>}
-          <PriceChart candles={candles} forecast={forecast} showBand={showBand} overlays={overlays} viewKey={`${epic}|${resolution}|${horizon}`} />
+          <PriceChart candles={candles} forecast={forecast} showBand={showBand} overlays={overlays} resMinutes={RESOLUTIONS[resolution].minutes} viewKey={`${epic}|${resolution}|${horizon}`} />
         </div>
 
 
@@ -499,6 +502,7 @@ export default function Dashboard({ instruments }: { instruments: Instrument[] }
             }}
           />
           <SentimentPanel sentiment={meta?.sentiment} direction={forecast?.direction} />
+          <VolumeProfilePanel candles={candles} resMinutes={RESOLUTIONS[resolution].minutes} direction={forecast?.direction} decimals={decimals} />
           <ContextPanel data={marketContext} direction={forecast?.direction} />
           <MarketClock />
           <CompareChart selected={epic} onSelect={selectEpic} />

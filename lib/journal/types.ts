@@ -41,6 +41,8 @@ export interface JournalEntry {
   deriv?: { funding: number; longPct?: number; oi1hPct?: number };
   /** Where the big speculators (CFTC weekly report) stood, as a percentile of the last three years (0 = the most short, 100 = the most long) */
   cot?: number;
+  /** Where the price stood against the day's value area (volume profile) when the forecast was made */
+  va?: "in" | "above" | "below";
   /** Final close of candle t */
   ref?: number;
   /** Final close of the candle before t (for the "follow the last candle" baseline) */
@@ -102,6 +104,8 @@ export interface JournalStats {
   byConfluence: { low: JournalHit; mid: JournalHit; high: JournalHit };
   /** Hit rate depending on whether the price sat on a Fibonacci retracement level */
   byFib: { near: JournalHit; away: JournalHit };
+  /** Hit rate by position against the value area: inside it, forecast toward it (return to value), forecast away from it (acceptance) */
+  byValue: { inside: JournalHit; toward: JournalHit; away: JournalHit };
   /** Hit rate depending on whether a high-impact announcement fell inside the forecast window */
   byNews: { near: JournalHit; calm: JournalHit };
   /** Net simulated return in %, one unit of notional per call, after the assumed spread */
