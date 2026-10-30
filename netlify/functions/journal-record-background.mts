@@ -39,24 +39,33 @@ export default async (req: Request, context: { site?: { url?: string } }) => {
       console.warn(`[journal-record] no plan (status ${planRes.status})`);
       return;
     }
-    let ok = 0, failed = 0;
+    let ok = 0;
+    const retry: string[] = [];
     const queue = [...calls];
+    const ask = async (call: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`${site}/api/journal/record?${call}`, { headers, signal: AbortSignal.timeout(58_000) });
+        if (!res.ok) console.warn(`[journal-record] ${call}: status ${res.status}`);
+        return res.ok;
+      } catch (err) {
+        console.warn(`[journal-record] ${call}: ${err instanceof Error ? err.name : "unknown"}`);
+        return false;
+      }
+    };
     const worker = async () => {
       for (let call = queue.shift(); call; call = queue.shift()) {
-        try {
-          const res = await fetch(`${site}/api/journal/record?${call}`, { headers, signal: AbortSignal.timeout(58_000) });
-          if (res.ok) ok++;
-          else {
-            failed++;
-            console.warn(`[journal-record] ${call}: status ${res.status}`);
-          }
-        } catch (err) {
-          failed++;
-          console.warn(`[journal-record] ${call}: ${err instanceof Error ? err.name : "unknown"}`);
-        }
+        if (await ask(call)) ok++;
+        else retry.push(call);
       }
     };
     await Promise.all([worker(), worker()]);
+    // A forecast that ran out of time (the slowest markets sometimes do) is asked for once more: the second run finds the
+    // price histories and the model's answer already warm, and nothing is recorded twice (one entry per window)
+    let failed = 0;
+    for (const call of retry) {
+      if (await ask(call)) ok++;
+      else failed++;
+    }
     console.log(`[journal-record] done (${asked}): ${ok} recorded, ${failed} failed`);
   } catch (err) {
     console.warn("[journal-record] failed:", err instanceof Error ? err.name : "unknown");
