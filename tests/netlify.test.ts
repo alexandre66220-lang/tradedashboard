@@ -100,10 +100,27 @@ describe("Netlify scheduled functions", () => {
     await record(new Request("https://dash.example.app/x?scope=intraday", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls[0]).toBe("https://dash.example.app/api/journal/record?plan=intraday");
-    expect(urls.slice(1).sort()).toEqual(calls.slice(0, 3).map((c) => `https://dash.example.app/api/journal/record?${c}`).sort()); // the odd one is dropped
+    expect([...new Set(urls.slice(1))].sort()).toEqual(calls.slice(0, 3).map((c) => `https://dash.example.app/api/journal/record?${c}`).sort()); // the odd one is dropped
+    expect(urls.filter((u) => u.includes("US100"))).toHaveLength(2); // the failing one was asked for twice
     expect(fetchMock.mock.calls.every((c) => (c[1] as RequestInit).headers && ((c[1] as RequestInit).headers as Record<string, string>).Authorization === "Bearer s3cret")).toBe(true);
     expect(peak).toBeLessThanOrEqual(2);
     expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/done \(intraday\): 2 recorded, 1 failed/);
+  });
+
+  it("recorder asks once more for a forecast that failed, and only once", async () => {
+    const calls = ["scope=intraday&epic=OIL_CRUDE", "scope=intraday&epic=GOLD"];
+    const tries: Record<string, number> = {};
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (String(url).includes("plan=intraday")) return new Response(JSON.stringify({ calls }), { status: 200 });
+      tries[url] = (tries[url] ?? 0) + 1;
+      // oil fails the first time and works the second; gold never works
+      const ok = String(url).includes("OIL") ? tries[url] >= 2 : false;
+      return new Response("{}", { status: ok ? 200 : 504 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await record(new Request("https://dash.example.app/x?scope=intraday", { method: "POST", headers: { Authorization: "Bearer s3cret" } }), ctx);
+    expect(Object.values(tries).sort()).toEqual([2, 2]);
+    expect(vi.mocked(console.log).mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/done \(intraday\): 1 recorded, 1 failed/);
   });
 
   it("recorder stops quietly when the plan cannot be read", async () => {
